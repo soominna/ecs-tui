@@ -40,6 +40,7 @@ brews:
   - repository:
       owner: soominna
       name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: https://github.com/soominna/ecs-tui
     description: Terminal UI for Amazon ECS
     license: MIT
