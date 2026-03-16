@@ -2,3 +2,4 @@ ecs-tui
 dist/
 PLAN.md
 .claude/
+.env
