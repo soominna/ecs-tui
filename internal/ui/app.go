@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	awsclient "github.com/nicewook/ecs-tui/internal/aws"
-	execpkg "github.com/nicewook/ecs-tui/internal/exec"
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
+	execpkg "github.com/soominna/ecs-tui/internal/exec"
 )
 
 // App is the root model that manages the view stack.

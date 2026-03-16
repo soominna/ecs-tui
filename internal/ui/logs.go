@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 
-	awsclient "github.com/nicewook/ecs-tui/internal/aws"
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
 )
 
 const maxLogLines = 10000

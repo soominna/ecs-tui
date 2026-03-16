@@ -8,10 +8,10 @@ A terminal UI for Amazon ECS. Browse clusters, services, and tasks interactively
 
 ```bash
 # Go
-go install github.com/nicewook/ecs-tui@latest
+go install github.com/soominna/ecs-tui@latest
 
 # Homebrew
-brew tap nicewook/tap
+brew tap soominna/tap
 brew install ecs-tui
 
 # GitHub Releases

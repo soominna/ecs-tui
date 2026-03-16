@@ -38,9 +38,9 @@ changelog:
 
 brews:
   - repository:
-      owner: nicewook
+      owner: soominna
       name: homebrew-tap
-    homepage: https://github.com/nicewook/ecs-tui
+    homepage: https://github.com/soominna/ecs-tui
     description: Terminal UI for Amazon ECS
     license: MIT
     install: |

@@ -1,4 +1,4 @@
-module github.com/nicewook/ecs-tui
+module github.com/soominna/ecs-tui
 
 go 1.24
 

@@ -6,7 +6,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 
-	awsclient "github.com/nicewook/ecs-tui/internal/aws"
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
 )
 
 type ClusterView struct {

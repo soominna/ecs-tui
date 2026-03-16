@@ -11,8 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	awsclient "github.com/nicewook/ecs-tui/internal/aws"
-	execpkg "github.com/nicewook/ecs-tui/internal/exec"
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
+	execpkg "github.com/soominna/ecs-tui/internal/exec"
 )
 
 type TaskView struct {

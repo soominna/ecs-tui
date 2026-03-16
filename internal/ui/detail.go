@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	awsclient "github.com/nicewook/ecs-tui/internal/aws"
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
 )
 
 type DetailView struct {

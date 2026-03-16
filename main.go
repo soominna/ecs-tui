@@ -8,8 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	awsclient "github.com/nicewook/ecs-tui/internal/aws"
-	"github.com/nicewook/ecs-tui/internal/ui"
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
+	"github.com/soominna/ecs-tui/internal/ui"
 )
 
 var version = "dev"
