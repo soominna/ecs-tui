@@ -26,14 +26,14 @@ func SaveLastSession(profile, region string) error {
 	if p == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
 	data, err := json.Marshal(LastSession{Profile: profile, Region: region})
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o644)
+	return os.WriteFile(p, data, 0o600)
 }
 
 // LoadLastSession returns the previously saved session, or nil if none exists.
