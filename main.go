@@ -35,6 +35,9 @@ func main() {
 		if last := awsclient.LoadLastSession(); last != nil {
 			*profile = last.Profile
 			*region = last.Region
+			if last.Theme != "" {
+				ui.ApplyTheme(last.Theme)
+			}
 		} else {
 			*profile, *region = awsclient.DetectCurrentConfig()
 		}
@@ -46,7 +49,9 @@ func main() {
 			// Don't exit — fall through to ConfigView so user can fix settings
 			client = nil
 		} else {
-			_ = awsclient.SaveLastSession(*profile, *region)
+			if err := awsclient.SaveLastSession(*profile, *region, ui.CurrentThemeName()); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
+		}
 		}
 	}
 

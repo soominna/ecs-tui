@@ -2,14 +2,16 @@ package aws
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 )
 
-// LastSession stores the most recently used profile and region.
+// LastSession stores the most recently used profile, region, and theme.
 type LastSession struct {
 	Profile string `json:"profile"`
 	Region  string `json:"region"`
+	Theme   string `json:"theme,omitempty"`
 }
 
 func sessionFilePath() string {
@@ -20,20 +22,38 @@ func sessionFilePath() string {
 	return filepath.Join(home, ".config", "ecs-tui", "session.json")
 }
 
-// SaveLastSession persists the profile and region for next launch.
-func SaveLastSession(profile, region string) error {
+// SaveLastSession persists the profile, region, and theme for next launch.
+func SaveLastSession(profile, region, theme string) error {
 	p := sessionFilePath()
 	if p == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
+	dir := filepath.Dir(p)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("creating session dir: %w", err)
 	}
-	data, err := json.Marshal(LastSession{Profile: profile, Region: region})
+	// Enforce directory permissions even if it already existed
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("setting session dir permissions: %w", err)
+	}
+	data, err := json.Marshal(LastSession{Profile: profile, Region: region, Theme: theme})
 	if err != nil {
-		return err
+		return fmt.Errorf("marshaling session: %w", err)
 	}
-	return os.WriteFile(p, data, 0o600)
+	// Atomic write: write to temp file, set permissions, then rename
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return fmt.Errorf("writing session file: %w", err)
+	}
+	if err := os.Chmod(tmp, 0o600); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("setting session file permissions: %w", err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("renaming session file: %w", err)
+	}
+	return nil
 }
 
 // LoadLastSession returns the previously saved session, or nil if none exists.

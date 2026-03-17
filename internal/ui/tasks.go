@@ -27,10 +27,18 @@ type TaskView struct {
 	filterInput textinput.Model
 	filtering   bool
 	filterText  string
+	// Confirm action state
+	confirmAction  string // "stop-task" | ""
+	confirmMsg     string
+	pendingTaskARN string
 }
 
 type tasksLoadedMsg struct {
 	tasks []awsclient.TaskInfo
+}
+
+type taskActionDoneMsg struct {
+	message string
 }
 
 type taskTickMsg time.Time
@@ -51,6 +59,12 @@ func NewTaskView(client *awsclient.Client, cluster, service string) *TaskView {
 func (v *TaskView) Title() string { return fmt.Sprintf("Tasks (%s)", v.service) }
 
 func (v *TaskView) ShortcutHelp() []Shortcut {
+	if v.confirmAction != "" {
+		return []Shortcut{
+			{Key: "y", Desc: "Confirm"},
+			{Key: "n/Esc", Desc: "Cancel"},
+		}
+	}
 	if v.filtering {
 		return []Shortcut{
 			{Key: "Enter", Desc: "Apply"},
@@ -61,6 +75,7 @@ func (v *TaskView) ShortcutHelp() []Shortcut {
 		{Key: "Enter/d", Desc: "Detail"},
 		{Key: "l", Desc: "Logs"},
 		{Key: "e", Desc: "Exec"},
+		{Key: "s", Desc: "Stop Task"},
 		{Key: "/", Desc: "Filter"},
 		{Key: "r", Desc: "Refresh"},
 		{Key: "Esc", Desc: "Back"},
@@ -78,8 +93,13 @@ func (v *TaskView) tickCmd() tea.Cmd {
 }
 
 func (v *TaskView) fetchTasks() tea.Cmd {
+	client := v.client
+	cluster := v.cluster
+	service := v.service
 	return func() tea.Msg {
-		tasks, err := v.client.ListTasks(context.Background(), v.cluster, v.service)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		tasks, err := client.ListTasks(ctx, cluster, service)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -96,9 +116,9 @@ func (v *TaskView) selectedTask() *awsclient.TaskInfo {
 		return nil
 	}
 	taskID := row[0]
-	for _, t := range v.tasks {
-		if t.TaskID == taskID {
-			return &t
+	for i := range v.tasks {
+		if v.tasks[i].TaskID == taskID {
+			return &v.tasks[i]
 		}
 	}
 	return nil
@@ -120,6 +140,20 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.rebuildTable()
 		return v, nil
 
+	case themeChangedMsg:
+		if v.loaded {
+			v.rebuildTable()
+		}
+		return v, nil
+
+	case taskActionDoneMsg:
+		v.confirmAction = ""
+		v.confirmMsg = ""
+		return v, tea.Batch(
+			v.fetchTasks(),
+			func() tea.Msg { return StatusMsg{Message: msg.message} },
+		)
+
 	case taskTickMsg:
 		if v.loaded {
 			return v, tea.Batch(v.fetchTasks(), v.tickCmd())
@@ -127,6 +161,35 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, v.tickCmd()
 
 	case tea.KeyMsg:
+		// Priority 1: Confirm action mode
+		if v.confirmAction != "" {
+			switch msg.String() {
+			case "y", "Y":
+				action := v.confirmAction
+				taskARN := v.pendingTaskARN
+				client := v.client
+				cluster := v.cluster
+				v.confirmAction = ""
+				v.confirmMsg = ""
+				if action == "stop-task" {
+					return v, func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						defer cancel()
+						err := client.StopTask(ctx, cluster, taskARN, "Stopped via ECS-TUI")
+						if err != nil {
+							return ErrorMsg{Err: err}
+						}
+						return taskActionDoneMsg{message: "Task stop requested"}
+					}
+				}
+			case "n", "N", "esc":
+				v.confirmAction = ""
+				v.confirmMsg = ""
+			}
+			return v, nil
+		}
+
+		// Priority 2: Filter mode
 		if v.filtering {
 			switch msg.String() {
 			case "enter":
@@ -148,6 +211,7 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
+		// Priority 3: Normal mode
 		switch msg.String() {
 		case "enter", "d":
 			task := v.selectedTask()
@@ -189,6 +253,14 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				task.TaskID,
 				task.ContainerName,
 			)
+		case "s":
+			task := v.selectedTask()
+			if task != nil {
+				v.pendingTaskARN = task.TaskARN
+				v.confirmAction = "stop-task"
+				v.confirmMsg = fmt.Sprintf("Stop task '%s'? (y/n)", task.TaskID)
+			}
+			return v, nil
 		case "/":
 			v.filtering = true
 			v.filterInput.Focus()
@@ -222,6 +294,7 @@ func (v *TaskView) View() string {
 
 	var sb strings.Builder
 
+	// Filter bar (inline)
 	if v.filtering {
 		sb.WriteString("  Filter: ")
 		sb.WriteString(v.filterInput.View())
@@ -233,10 +306,25 @@ func (v *TaskView) View() string {
 	}
 
 	sb.WriteString(v.table.View())
-	return sb.String()
+	base := sb.String()
+
+	// Modal overlay for confirm
+	if v.confirmAction != "" {
+		titleStyle := lipgloss.NewStyle().Foreground(colorPeach).Bold(true)
+		hintStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+		content := titleStyle.Render(v.confirmMsg) + "\n\n" +
+			hintStyle.Render("  <y> Confirm    <n/Esc> Cancel")
+		box := OverlayBoxStyle().Render(content)
+		return RenderOverlay(base, box, v.width, v.height)
+	}
+
+	return base
 }
 
 func (v *TaskView) rebuildTable() {
+	// Preserve cursor position across rebuilds
+	prevCursor := v.table.Cursor()
+
 	rcols := []responsiveColumn{
 		{Title: "Task ID", MinWidth: 12, Flex: 3},
 		{Title: "Status", MinWidth: 10, Flex: 0},
@@ -295,16 +383,20 @@ func (v *TaskView) rebuildTable() {
 	)
 
 	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(true)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(false)
+	hdr, sel := TableStyles()
+	s.Header = hdr
+	s.Selected = sel
+	s.Cell = s.Cell.Foreground(colorText)
 	tbl.SetStyles(s)
+
+	// Restore cursor, clamped to row count
+	if prevCursor >= len(rows) {
+		prevCursor = len(rows) - 1
+	}
+	if prevCursor < 0 {
+		prevCursor = 0
+	}
+	tbl.SetCursor(prevCursor)
 
 	v.table = tbl
 }

@@ -53,3 +53,6 @@ type AWSConfigChangedMsg struct {
 type ClusterSelectedMsg struct {
 	ClusterName string
 }
+
+// themeChangedMsg signals that the dark/light theme was toggled.
+type themeChangedMsg struct{}

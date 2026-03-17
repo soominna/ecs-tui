@@ -45,6 +45,11 @@ type TaskDefinitionInfo struct {
 	LogPrefix string
 }
 
+type ServiceEvent struct {
+	CreatedAt time.Time
+	Message   string
+}
+
 func (c *Client) ListClusters(ctx context.Context) ([]ClusterInfo, error) {
 	var clusterARNs []string
 	paginator := ecs.NewListClustersPaginator(c.ECS, &ecs.ListClustersInput{})
@@ -67,7 +72,7 @@ func (c *Client) ListClusters(ctx context.Context) ([]ClusterInfo, error) {
 		return nil, fmt.Errorf("describing clusters: %w", err)
 	}
 
-	var clusters []ClusterInfo
+	clusters := make([]ClusterInfo, 0, len(desc.Clusters))
 	for _, cl := range desc.Clusters {
 		clusters = append(clusters, ClusterInfo{
 			ARN:  aws.ToString(cl.ClusterArn),
@@ -272,6 +277,64 @@ func (c *Client) DescribeTaskDefinitionForContainer(ctx context.Context, taskDef
 	}
 
 	return info, nil
+}
+
+func (c *Client) GetServiceEvents(ctx context.Context, cluster, serviceName string) ([]ServiceEvent, error) {
+	out, err := c.ECS.DescribeServices(ctx, &ecs.DescribeServicesInput{
+		Cluster:  aws.String(cluster),
+		Services: []string{serviceName},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describing service for events: %w", err)
+	}
+	if len(out.Services) == 0 {
+		return nil, fmt.Errorf("service %s not found", serviceName)
+	}
+
+	events := make([]ServiceEvent, 0, len(out.Services[0].Events))
+	for _, e := range out.Services[0].Events {
+		events = append(events, ServiceEvent{
+			CreatedAt: aws.ToTime(e.CreatedAt),
+			Message:   aws.ToString(e.Message),
+		})
+	}
+	return events, nil
+}
+
+func (c *Client) ForceNewDeployment(ctx context.Context, cluster, serviceName string) error {
+	_, err := c.ECS.UpdateService(ctx, &ecs.UpdateServiceInput{
+		Cluster:            aws.String(cluster),
+		Service:            aws.String(serviceName),
+		ForceNewDeployment: true,
+	})
+	if err != nil {
+		return fmt.Errorf("force new deployment: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) UpdateDesiredCount(ctx context.Context, cluster, serviceName string, count int32) error {
+	_, err := c.ECS.UpdateService(ctx, &ecs.UpdateServiceInput{
+		Cluster:      aws.String(cluster),
+		Service:      aws.String(serviceName),
+		DesiredCount: aws.Int32(count),
+	})
+	if err != nil {
+		return fmt.Errorf("update desired count: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) StopTask(ctx context.Context, cluster, taskARN, reason string) error {
+	_, err := c.ECS.StopTask(ctx, &ecs.StopTaskInput{
+		Cluster: aws.String(cluster),
+		Task:    aws.String(taskARN),
+		Reason:  aws.String(reason),
+	})
+	if err != nil {
+		return fmt.Errorf("stop task: %w", err)
+	}
+	return nil
 }
 
 func extractTaskID(taskARN string) string {

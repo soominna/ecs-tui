@@ -84,13 +84,14 @@ func (v *LogView) Init() tea.Cmd {
 }
 
 func (v *LogView) fetchLogInfo() tea.Cmd {
+	client := v.client
+	taskDefARN := v.task.TaskDefARN
+	containerName := v.task.ContainerName
+	taskID := v.task.TaskID
 	return func() tea.Msg {
-		info, err := v.client.GetLogInfo(
-			context.Background(),
-			v.task.TaskDefARN,
-			v.task.ContainerName,
-			v.task.TaskID,
-		)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		info, err := client.GetLogInfo(ctx, taskDefARN, containerName, taskID)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -114,6 +115,7 @@ func (v *LogView) startLiveTail() tea.Cmd {
 		v.cancel = nil
 		v.eventCh = nil
 		v.logLines = append(v.logLines, fmt.Sprintf("LiveTail unavailable: %v", err))
+		v.updateViewport()
 		return nil
 	}
 	v.streaming = true
@@ -142,18 +144,18 @@ func (v *LogView) pollTickCmd() tea.Cmd {
 }
 
 func (v *LogView) pollLogs() tea.Cmd {
+	client := v.client
+	logGroup := v.logInfo.LogGroup
+	logStream := v.logInfo.LogStream
+	nextToken := v.nextToken
 	return func() tea.Msg {
-		events, nextToken, err := v.client.GetLogEvents(
-			context.Background(),
-			v.logInfo.LogGroup,
-			v.logInfo.LogStream,
-			v.nextToken,
-			100,
-		)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		events, newToken, err := client.GetLogEvents(ctx, logGroup, logStream, nextToken, 100)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
-		return logEventsMsg{events: events, nextToken: nextToken}
+		return logEventsMsg{events: events, nextToken: newToken}
 	}
 }
 
@@ -201,6 +203,10 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.viewport.Width = v.width
 			v.viewport.Height = v.height
 		}
+		v.updateViewport()
+		return v, nil
+
+	case themeChangedMsg:
 		v.updateViewport()
 		return v, nil
 

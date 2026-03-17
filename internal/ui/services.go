@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,6 +28,14 @@ type ServiceView struct {
 	filterInput textinput.Model
 	filtering   bool
 	filterText  string
+	// Confirm action state
+	confirmAction  string // "force-deploy" | "update-count" | ""
+	confirmMsg     string
+	pendingService string
+	pendingCount   int32
+	// Count input state
+	inputtingCount bool
+	countInput     textinput.Model
 }
 
 type servicesLoadedMsg struct {
@@ -41,6 +50,10 @@ type serviceMetricsLoadedMsg struct {
 	metrics map[string]*awsclient.ServiceMetrics
 }
 
+type serviceActionDoneMsg struct {
+	message string
+}
+
 type serviceTickMsg time.Time
 
 func NewServiceView(client *awsclient.Client, cluster string) *ServiceView {
@@ -48,18 +61,35 @@ func NewServiceView(client *awsclient.Client, cluster string) *ServiceView {
 	ti.Placeholder = "Filter services..."
 	ti.CharLimit = 50
 
+	ci := textinput.New()
+	ci.Placeholder = "Enter desired count..."
+	ci.CharLimit = 5
+
 	return &ServiceView{
 		client:      client,
 		cluster:     cluster,
 		taskDefs:    make(map[string]*awsclient.TaskDefinitionInfo),
 		metrics:     make(map[string]*awsclient.ServiceMetrics),
 		filterInput: ti,
+		countInput:  ci,
 	}
 }
 
 func (v *ServiceView) Title() string { return "Services" }
 
 func (v *ServiceView) ShortcutHelp() []Shortcut {
+	if v.confirmAction != "" {
+		return []Shortcut{
+			{Key: "y", Desc: "Confirm"},
+			{Key: "n/Esc", Desc: "Cancel"},
+		}
+	}
+	if v.inputtingCount {
+		return []Shortcut{
+			{Key: "Enter", Desc: "Submit"},
+			{Key: "Esc", Desc: "Cancel"},
+		}
+	}
 	if v.filtering {
 		return []Shortcut{
 			{Key: "Enter", Desc: "Apply"},
@@ -68,6 +98,9 @@ func (v *ServiceView) ShortcutHelp() []Shortcut {
 	}
 	return []Shortcut{
 		{Key: "Enter", Desc: "Tasks"},
+		{Key: "e", Desc: "Events"},
+		{Key: "f", Desc: "Force Deploy"},
+		{Key: "d", Desc: "Desired Count"},
 		{Key: "/", Desc: "Filter"},
 		{Key: "r", Desc: "Refresh"},
 		{Key: "Esc", Desc: "Back"},
@@ -85,8 +118,12 @@ func (v *ServiceView) tickCmd() tea.Cmd {
 }
 
 func (v *ServiceView) fetchServices() tea.Cmd {
+	client := v.client
+	cluster := v.cluster
 	return func() tea.Msg {
-		services, err := v.client.ListServices(context.Background(), v.cluster)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		services, err := client.ListServices(ctx, cluster)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -95,15 +132,21 @@ func (v *ServiceView) fetchServices() tea.Cmd {
 }
 
 func (v *ServiceView) fetchTaskDefs() tea.Cmd {
+	// Copy services slice to avoid data race with concurrent updates
+	services := make([]awsclient.ServiceInfo, len(v.services))
+	copy(services, v.services)
+	client := v.client
 	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		defs := make(map[string]*awsclient.TaskDefinitionInfo)
 		seen := make(map[string]bool)
-		for _, svc := range v.services {
+		for _, svc := range services {
 			if svc.TaskDef == "" || seen[svc.TaskDef] {
 				continue
 			}
 			seen[svc.TaskDef] = true
-			td, err := v.client.DescribeTaskDefinition(context.Background(), svc.TaskDef)
+			td, err := client.DescribeTaskDefinition(ctx, svc.TaskDef)
 			if err != nil {
 				continue
 			}
@@ -114,17 +157,39 @@ func (v *ServiceView) fetchTaskDefs() tea.Cmd {
 }
 
 func (v *ServiceView) fetchMetrics() tea.Cmd {
+	// Copy data to avoid data race with concurrent updates
+	names := make([]string, 0, len(v.services))
+	for _, svc := range v.services {
+		names = append(names, svc.Name)
+	}
+	client := v.client
+	cluster := v.cluster
 	return func() tea.Msg {
-		var names []string
-		for _, svc := range v.services {
-			names = append(names, svc.Name)
-		}
-		metrics, err := v.client.GetServiceMetrics(context.Background(), v.cluster, names)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		metrics, err := client.GetServiceMetrics(ctx, cluster, names)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
 		return serviceMetricsLoadedMsg{metrics: metrics}
 	}
+}
+
+func (v *ServiceView) selectedService() *awsclient.ServiceInfo {
+	if len(v.table.Rows()) == 0 {
+		return nil
+	}
+	row := v.table.SelectedRow()
+	if len(row) == 0 {
+		return nil
+	}
+	name := row[0]
+	for i := range v.services {
+		if v.services[i].Name == name {
+			return &v.services[i]
+		}
+	}
+	return nil
 }
 
 func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -153,6 +218,20 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.rebuildTable()
 		return v, nil
 
+	case themeChangedMsg:
+		if v.loaded {
+			v.rebuildTable()
+		}
+		return v, nil
+
+	case serviceActionDoneMsg:
+		v.confirmAction = ""
+		v.confirmMsg = ""
+		return v, tea.Batch(
+			v.fetchServices(),
+			func() tea.Msg { return StatusMsg{Message: msg.message} },
+		)
+
 	case serviceTickMsg:
 		if v.loaded {
 			return v, tea.Batch(v.fetchServices(), v.tickCmd())
@@ -160,6 +239,79 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, v.tickCmd()
 
 	case tea.KeyMsg:
+		// Priority 1: Confirm action mode
+		if v.confirmAction != "" {
+			switch msg.String() {
+			case "y", "Y":
+				action := v.confirmAction
+				svcName := v.pendingService
+				count := v.pendingCount
+				client := v.client
+				cluster := v.cluster
+				v.confirmAction = ""
+				v.confirmMsg = ""
+				switch action {
+				case "force-deploy":
+					return v, func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						defer cancel()
+						err := client.ForceNewDeployment(ctx, cluster, svcName)
+						if err != nil {
+							return ErrorMsg{Err: err}
+						}
+						return serviceActionDoneMsg{message: fmt.Sprintf("Force deploy triggered: %s", svcName)}
+					}
+				case "update-count":
+					return v, func() tea.Msg {
+						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						defer cancel()
+						err := client.UpdateDesiredCount(ctx, cluster, svcName, count)
+						if err != nil {
+							return ErrorMsg{Err: err}
+						}
+						return serviceActionDoneMsg{message: fmt.Sprintf("Desired count updated to %d: %s", count, svcName)}
+					}
+				}
+			case "n", "N", "esc":
+				v.confirmAction = ""
+				v.confirmMsg = ""
+			}
+			return v, nil
+		}
+
+		// Priority 2: Count input mode
+		if v.inputtingCount {
+			switch msg.String() {
+			case "enter":
+				val := v.countInput.Value()
+				count, err := strconv.Atoi(val)
+				if err != nil || count < 0 || count > 10000 {
+					v.inputtingCount = false
+					v.countInput.Blur()
+					v.countInput.SetValue("")
+					return v, func() tea.Msg {
+						return ErrorMsg{Err: fmt.Errorf("invalid count: %s (must be 0-10000)", val)}
+					}
+				}
+				v.inputtingCount = false
+				v.countInput.Blur()
+				v.countInput.SetValue("")
+				v.pendingCount = int32(count) //nolint:gosec // bounds checked above
+				v.confirmAction = "update-count"
+				v.confirmMsg = fmt.Sprintf("Update desired count of '%s' to %d? (y/n)", v.pendingService, count)
+				return v, nil
+			case "esc":
+				v.inputtingCount = false
+				v.countInput.Blur()
+				v.countInput.SetValue("")
+				return v, nil
+			}
+			var cmd tea.Cmd
+			v.countInput, cmd = v.countInput.Update(msg)
+			return v, cmd
+		}
+
+		// Priority 3: Filter mode
 		if v.filtering {
 			switch msg.String() {
 			case "enter":
@@ -181,19 +333,42 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return v, cmd
 		}
 
+		// Priority 4: Normal mode
 		switch msg.String() {
 		case "enter":
-			if len(v.table.Rows()) == 0 {
-				return v, nil
-			}
-			row := v.table.SelectedRow()
-			if len(row) > 0 {
-				serviceName := row[0]
-				taskView := NewTaskView(v.client, v.cluster, serviceName)
+			svc := v.selectedService()
+			if svc != nil {
+				taskView := NewTaskView(v.client, v.cluster, svc.Name)
 				return v, func() tea.Msg {
 					return PushViewMsg{View: taskView}
 				}
 			}
+		case "e":
+			svc := v.selectedService()
+			if svc != nil {
+				eventsView := NewServiceEventsView(v.client, v.cluster, svc.Name)
+				return v, func() tea.Msg {
+					return PushViewMsg{View: eventsView}
+				}
+			}
+		case "f":
+			svc := v.selectedService()
+			if svc != nil {
+				v.pendingService = svc.Name
+				v.confirmAction = "force-deploy"
+				v.confirmMsg = fmt.Sprintf("Force new deployment for '%s'? (y/n)", svc.Name)
+			}
+			return v, nil
+		case "d":
+			svc := v.selectedService()
+			if svc != nil {
+				v.pendingService = svc.Name
+				v.inputtingCount = true
+				v.countInput.SetValue(fmt.Sprintf("%d", svc.DesiredCount))
+				v.countInput.Focus()
+				return v, textinput.Blink
+			}
+			return v, nil
 		case "/":
 			v.filtering = true
 			v.filterInput.Focus()
@@ -227,6 +402,7 @@ func (v *ServiceView) View() string {
 
 	var sb strings.Builder
 
+	// Filter bar (inline — not modal)
 	if v.filtering {
 		sb.WriteString("  Filter: ")
 		sb.WriteString(v.filterInput.View())
@@ -238,10 +414,33 @@ func (v *ServiceView) View() string {
 	}
 
 	sb.WriteString(v.table.View())
-	return sb.String()
+	base := sb.String()
+
+	// Modal overlays for confirm / count input
+	if v.confirmAction != "" {
+		titleStyle := lipgloss.NewStyle().Foreground(colorPeach).Bold(true)
+		hintStyle := lipgloss.NewStyle().Foreground(colorSubtext0)
+		content := titleStyle.Render(v.confirmMsg) + "\n\n" +
+			hintStyle.Render("  <y> Confirm    <n/Esc> Cancel")
+		box := OverlayBoxStyle().Render(content)
+		return RenderOverlay(base, box, v.width, v.height)
+	}
+	if v.inputtingCount {
+		titleStyle := lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+		content := titleStyle.Render("Desired Count") + "\n\n" +
+			"  " + v.countInput.View() + "\n\n" +
+			lipgloss.NewStyle().Foreground(colorSubtext0).Render("  <Enter> Submit    <Esc> Cancel")
+		box := OverlayBoxStyle().Render(content)
+		return RenderOverlay(base, box, v.width, v.height)
+	}
+
+	return base
 }
 
 func (v *ServiceView) rebuildTable() {
+	// Preserve cursor position across rebuilds
+	prevCursor := v.table.Cursor()
+
 	rcols := []responsiveColumn{
 		{Title: "Service", MinWidth: 15, Flex: 3},
 		{Title: "Status", MinWidth: 10, Flex: 0},
@@ -321,16 +520,20 @@ func (v *ServiceView) rebuildTable() {
 	)
 
 	s := table.DefaultStyles()
-	s.Header = s.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		BorderBottom(true).
-		Bold(true)
-	s.Selected = s.Selected.
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("57")).
-		Bold(false)
+	hdr, sel := TableStyles()
+	s.Header = hdr
+	s.Selected = sel
+	s.Cell = s.Cell.Foreground(colorText)
 	t.SetStyles(s)
+
+	// Restore cursor, clamped to row count
+	if prevCursor >= len(rows) {
+		prevCursor = len(rows) - 1
+	}
+	if prevCursor < 0 {
+		prevCursor = 0
+	}
+	t.SetCursor(prevCursor)
 
 	v.table = t
 }

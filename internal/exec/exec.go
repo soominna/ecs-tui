@@ -32,6 +32,18 @@ func ExecContainer(profile, region, cluster, service, taskID, container string) 
 		}
 	}
 
+	// Validate arguments don't start with "-" to prevent argument injection
+	for name, val := range map[string]string{
+		"cluster": cluster, "task": taskID, "container": container,
+		"profile": profile, "region": region,
+	} {
+		if val != "" && strings.HasPrefix(val, "-") {
+			return func() tea.Msg {
+				return ExecDoneMsg{Err: fmt.Errorf("invalid %s value: %q", name, val)}
+			}
+		}
+	}
+
 	// Check if aws CLI is available
 	if _, err := exec.LookPath("aws"); err != nil {
 		return func() tea.Msg {
@@ -98,21 +110,26 @@ func ExecContainer(profile, region, cluster, service, taskID, container string) 
 	})
 }
 
+// shellQuote wraps a string in single quotes for safe shell usage.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 func buildEnableExecHint(profile, region, cluster, service string) string {
 	var sb strings.Builder
 	sb.WriteString("Execute command is not enabled for this service.\n")
 	sb.WriteString("Run the following command to enable it:\n\n")
 
 	sb.WriteString("  aws ecs update-service \\\n")
-	sb.WriteString(fmt.Sprintf("    --cluster %s \\\n", cluster))
-	sb.WriteString(fmt.Sprintf("    --service %s \\\n", service))
+	sb.WriteString(fmt.Sprintf("    --cluster %s \\\n", shellQuote(cluster)))
+	sb.WriteString(fmt.Sprintf("    --service %s \\\n", shellQuote(service)))
 	sb.WriteString("    --enable-execute-command \\\n")
 	sb.WriteString("    --force-new-deployment")
 	if profile != "" {
-		sb.WriteString(fmt.Sprintf(" \\\n    --profile %s", profile))
+		sb.WriteString(fmt.Sprintf(" \\\n    --profile %s", shellQuote(profile)))
 	}
 	if region != "" {
-		sb.WriteString(fmt.Sprintf(" \\\n    --region %s", region))
+		sb.WriteString(fmt.Sprintf(" \\\n    --region %s", shellQuote(region)))
 	}
 
 	sb.WriteString("\n\nAfter the new tasks are RUNNING, try exec again.")

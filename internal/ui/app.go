@@ -8,6 +8,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/charmbracelet/lipgloss"
+
 	awsclient "github.com/soominna/ecs-tui/internal/aws"
 	execpkg "github.com/soominna/ecs-tui/internal/exec"
 )
@@ -66,6 +68,9 @@ func closeView(v View) {
 
 // updateCurrentView safely updates the current view on the stack.
 func (a *App) updateCurrentView(updated tea.Model) {
+	if len(a.stack) == 0 {
+		return
+	}
 	if v, ok := updated.(View); ok {
 		a.stack[len(a.stack)-1] = v
 	}
@@ -97,6 +102,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			a.showHelp = !a.showHelp
 			return a, nil
+		case "esc":
+			if a.showHelp {
+				a.showHelp = false
+				return a, nil
+			}
+			// Fall through to current view's esc handler
+		// Theme toggle disabled temporarily
+		// case "T", "t":
+		//	ToggleTheme()
+		//  ...
 		case "P", "p":
 			if a.client != nil {
 				configView := NewConfigViewWithCurrent(a.client.Profile, a.client.Region)
@@ -162,13 +177,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case AWSConfigChangedMsg:
-		client, err := awsclient.NewClient(context.Background(), msg.Profile, msg.Region)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client, err := awsclient.NewClient(ctx, msg.Profile, msg.Region)
 		if err != nil {
 			a.err = err
 			return a, clearErrorAfter(5 * time.Second)
 		}
 		a.client = client
-		_ = awsclient.SaveLastSession(msg.Profile, msg.Region)
+		// Best-effort session save; don't block on failure
+		_ = awsclient.SaveLastSession(msg.Profile, msg.Region, CurrentThemeName()) //nolint:errcheck
 		a.cluster = ""
 		a.service = ""
 		a.err = nil
@@ -215,43 +233,44 @@ func (a *App) View() string {
 		content = a.stack[len(a.stack)-1].View()
 	}
 
-	// Pad content to fill space
+	// Pad content to fill space with themed background
 	contentHeight := a.contentHeight()
 	contentLines := countLines(content)
 	if contentLines < contentHeight {
-		for i := 0; i < contentHeight-contentLines; i++ {
-			content += "\n"
-		}
+		content += strings.Repeat("\n", contentHeight-contentLines)
 	}
 
 	return header + "\n" + content + "\n" + footer
 }
 
 func (a *App) renderHeader() string {
-	var parts []string
-	parts = append(parts, "ECS-TUI")
+	logoStyle := lipgloss.NewStyle().Foreground(colorBlue).Bold(true)
+	logo := logoStyle.Render(logoText)
 
+	// Build info text
+	var infoParts []string
 	if a.client != nil {
 		if a.client.Profile != "" {
-			parts = append(parts, fmt.Sprintf("Profile: %s", a.client.Profile))
+			infoParts = append(infoParts, fmt.Sprintf("Profile: %s", a.client.Profile))
 		}
 		if a.client.Region != "" {
-			parts = append(parts, fmt.Sprintf("Region: %s", a.client.Region))
+			infoParts = append(infoParts, fmt.Sprintf("Region: %s", a.client.Region))
 		}
 	}
 	if a.cluster != "" {
-		parts = append(parts, fmt.Sprintf("Cluster: %s", a.cluster))
+		infoParts = append(infoParts, fmt.Sprintf("Cluster: %s", a.cluster))
 	}
 
-	headerText := strings.Join(parts, " | ")
-
+	infoText := strings.Join(infoParts, "\n")
 	if a.err != nil {
-		headerText += "  " + errorStyle.Render(fmt.Sprintf("ERR: %v", a.err))
+		infoText += "\n" + errorStyle.Render(fmt.Sprintf("ERR: %v", a.err))
 	} else if a.status != "" {
-		headerText += "  " + statusStyle.Render(a.status)
+		infoText += "\n" + statusStyle.Render(a.status)
 	}
 
-	header := RenderHeader(headerText, a.width)
+	infoStyle := lipgloss.NewStyle().Foreground(colorSubtext1).PaddingLeft(6)
+	header := lipgloss.JoinHorizontal(lipgloss.Top, logo, infoStyle.Render(infoText))
+	header = headerStyle.Width(a.width).Render(header)
 
 	// Breadcrumb navigation path
 	if len(a.stack) > 0 {
@@ -266,7 +285,6 @@ func (a *App) renderBreadcrumb() string {
 	for i, v := range a.stack {
 		title := v.Title()
 		if i == len(a.stack)-1 {
-			// Current view — highlighted
 			crumbs = append(crumbs, breadcrumbActiveStyle.Render(title))
 		} else {
 			crumbs = append(crumbs, breadcrumbStyle.Render(title))
@@ -295,8 +313,8 @@ func (a *App) renderFooter() string {
 }
 
 func (a *App) contentHeight() int {
-	// header(1) + breadcrumb(1) + footer(1) + borders(1) = 4
-	return a.height - 4
+	// logo header (4 lines) + breadcrumb(1) + footer(1) + newlines(2) = 8
+	return a.height - 8
 }
 
 func clearErrorAfter(d time.Duration) tea.Cmd {
@@ -309,11 +327,5 @@ func countLines(s string) int {
 	if s == "" {
 		return 0
 	}
-	n := 1
-	for _, c := range s {
-		if c == '\n' {
-			n++
-		}
-	}
-	return n
+	return strings.Count(s, "\n") + 1
 }

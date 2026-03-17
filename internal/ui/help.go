@@ -7,24 +7,12 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// Style vars set by ApplyTheme in theme.go.
 var (
-	helpTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(colorPrimary).
-			MarginBottom(1)
-
-	helpKeyStyle = lipgloss.NewStyle().
-			Foreground(colorAccent).
-			Bold(true).
-			Width(15)
-
-	helpDescStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#CCCCCC"))
-
-	helpBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorPrimary).
-			Padding(1, 2)
+	helpTitleStyle lipgloss.Style
+	helpKeyStyle   lipgloss.Style
+	helpDescStyle  lipgloss.Style
+	helpBoxStyle   lipgloss.Style
 )
 
 func renderHelpOverlay(current View, width, height int) string {
@@ -34,14 +22,15 @@ func renderHelpOverlay(current View, width, height int) string {
 	sb.WriteString("\n\n")
 
 	// View-specific shortcuts
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorWhite).Render(fmt.Sprintf("── %s ──", current.Title())))
+	sectionLabel := lipgloss.NewStyle().Bold(true).Foreground(colorLavender).Background(colorBase)
+	sb.WriteString(sectionLabel.Render(fmt.Sprintf("── %s ──", current.Title())))
 	sb.WriteString("\n")
 	for _, s := range current.ShortcutHelp() {
 		sb.WriteString(helpKeyStyle.Render("<"+s.Key+">") + helpDescStyle.Render(s.Desc) + "\n")
 	}
 
 	sb.WriteString("\n")
-	sb.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorWhite).Render("── Global ──"))
+	sb.WriteString(sectionLabel.Render("── Global ──"))
 	sb.WriteString("\n")
 
 	globalShortcuts := []Shortcut{

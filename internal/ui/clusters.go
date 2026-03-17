@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,11 +11,12 @@ import (
 )
 
 type ClusterView struct {
-	client *awsclient.Client
-	list   list.Model
-	width  int
-	height int
-	loaded bool
+	client   *awsclient.Client
+	list     list.Model
+	clusters []awsclient.ClusterInfo
+	width    int
+	height   int
+	loaded   bool
 }
 
 type clusterItem struct {
@@ -48,8 +50,11 @@ func (v *ClusterView) Init() tea.Cmd {
 }
 
 func (v *ClusterView) fetchClusters() tea.Cmd {
+	client := v.client
 	return func() tea.Msg {
-		clusters, err := v.client.ListClusters(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		clusters, err := client.ListClusters(ctx)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -68,18 +73,15 @@ func (v *ClusterView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case clustersLoadedMsg:
-		var items []list.Item
-		for _, cl := range msg.clusters {
-			items = append(items, clusterItem{info: cl})
-		}
-		delegate := list.NewDefaultDelegate()
-		v.list = list.New(items, delegate, v.width, v.height)
-		v.list.Title = "ECS Clusters"
-		v.list.Styles.Title = titleStyle.Padding(0, 1)
-		v.list.SetShowStatusBar(true)
-		v.list.SetFilteringEnabled(true)
-		v.list.SetShowHelp(false)
+		v.clusters = msg.clusters
+		v.rebuildList()
 		v.loaded = true
+		return v, nil
+
+	case themeChangedMsg:
+		if v.loaded {
+			v.rebuildList()
+		}
 		return v, nil
 
 	case tea.KeyMsg:
@@ -113,6 +115,32 @@ func (v *ClusterView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, cmd
 	}
 	return v, nil
+}
+
+func (v *ClusterView) rebuildList() {
+	var items []list.Item
+	for _, cl := range v.clusters {
+		items = append(items, clusterItem{info: cl})
+	}
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(colorText).
+		Background(colorSurface0).
+		BorderLeftForeground(colorBlue)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+		Foreground(colorSubtext0).
+		Background(colorSurface0).
+		BorderLeftForeground(colorBlue)
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(colorSubtext1)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
+		Foreground(colorOverlay1)
+	v.list = list.New(items, delegate, v.width, v.height)
+	v.list.Title = "ECS Clusters"
+	v.list.Styles.Title = titleStyle.Padding(0, 1)
+	v.list.SetShowStatusBar(true)
+	v.list.SetFilteringEnabled(true)
+	v.list.SetShowHelp(false)
 }
 
 func (v *ClusterView) View() string {

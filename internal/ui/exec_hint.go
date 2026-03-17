@@ -52,6 +52,12 @@ func (v *ExecHintView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.viewport.SetContent(v.renderContent())
 		return v, nil
 
+	case themeChangedMsg:
+		if v.ready {
+			v.viewport.SetContent(v.renderContent())
+		}
+		return v, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
@@ -75,20 +81,20 @@ func (v *ExecHintView) View() string {
 }
 
 func (v *ExecHintView) renderContent() string {
-	errLabel := lipgloss.NewStyle().Bold(true).Foreground(colorError).
+	errLabel := lipgloss.NewStyle().Bold(true).Foreground(colorRed).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderBottom(true).
-			BorderForeground(lipgloss.Color("#444444")).
+			BorderForeground(colorSurface1).
 			Padding(0, 0, 0, 1).
 			MarginBottom(1)
-	hintLabel := lipgloss.NewStyle().Bold(true).Foreground(colorAccent).
+	hintLabel := lipgloss.NewStyle().Bold(true).Foreground(colorGreen).
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderBottom(true).
-			BorderForeground(lipgloss.Color("#444444")).
+			BorderForeground(colorSurface1).
 			Padding(0, 0, 0, 1).
 			MarginBottom(1)
-	cmdStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B"))
-	dimStyle := lipgloss.NewStyle().Foreground(colorMuted)
+	cmdStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	dimStyle := lipgloss.NewStyle().Foreground(colorOverlay1)
 
 	var sb strings.Builder
 

@@ -138,6 +138,19 @@ func (v *ConfigView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.ready = true
 		return v, nil
 
+	case themeChangedMsg:
+		if v.ready {
+			switch v.step {
+			case stepQuickStart:
+				v.buildQuickStartList()
+			case stepProfile:
+				v.buildProfileList()
+			case stepRegion:
+				v.buildRegionList()
+			}
+		}
+		return v, nil
+
 	case tea.KeyMsg:
 		if !v.ready {
 			return v, nil
@@ -349,11 +362,17 @@ func (v *ConfigView) buildRegionList() {
 func (v *ConfigView) newList(items []list.Item, title string) list.Model {
 	delegate := list.NewDefaultDelegate()
 	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(lipgloss.Color("#FFFFFF")).
-		BorderLeftForeground(colorAccent)
+		Foreground(colorText).
+		Background(colorSurface0).
+		BorderLeftForeground(colorBlue)
 	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(lipgloss.Color("#AAAAAA")).
-		BorderLeftForeground(colorAccent)
+		Foreground(colorSubtext0).
+		Background(colorSurface0).
+		BorderLeftForeground(colorBlue)
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(colorSubtext1)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
+		Foreground(colorOverlay1)
 
 	l := list.New(items, delegate, v.width, v.listHeight())
 	l.Title = title
@@ -372,28 +391,11 @@ func (v *ConfigView) listHeight() int {
 	return h
 }
 
-// Styles for the config view
+// Style vars set by ApplyTheme in theme.go.
 var (
-	configBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorPrimary).
-			Padding(0, 1)
-
-	configLabelStyle = lipgloss.NewStyle().
-				Foreground(colorMuted).
-				Bold(true)
-
-	configValueStyle = lipgloss.NewStyle().
-				Foreground(colorWhite).
-				Bold(true)
-
-	stepLabelStyle = lipgloss.NewStyle().
-			Background(colorPrimary).
-			Foreground(colorWhite).
-			Bold(true).
-			Padding(0, 1)
-
-	stepDescStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#AAAAAA")).
-			Padding(0, 1)
+	configBoxStyle   lipgloss.Style
+	configLabelStyle lipgloss.Style
+	configValueStyle lipgloss.Style
+	stepLabelStyle   lipgloss.Style
+	stepDescStyle    lipgloss.Style
 )

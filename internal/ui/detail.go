@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -46,8 +47,12 @@ func (v *DetailView) Init() tea.Cmd {
 	if v.task.TaskDefARN == "" {
 		return nil
 	}
+	client := v.client
+	taskDefARN := v.task.TaskDefARN
 	return func() tea.Msg {
-		td, err := v.client.DescribeTaskDefinition(context.Background(), v.task.TaskDefARN)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		td, err := client.DescribeTaskDefinition(ctx, taskDefARN)
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -68,6 +73,12 @@ func (v *DetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.viewport.Height = v.height
 		}
 		v.viewport.SetContent(v.renderContent())
+		return v, nil
+
+	case themeChangedMsg:
+		if v.ready {
+			v.viewport.SetContent(v.renderContent())
+		}
 		return v, nil
 
 	case taskDefDetailMsg:
@@ -100,8 +111,8 @@ func (v *DetailView) View() string {
 }
 
 func (v *DetailView) renderContent() string {
-	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(colorAccent).Width(20)
-	valueStyle := lipgloss.NewStyle().Foreground(colorWhite)
+	labelStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Width(20)
+	valueStyle := lipgloss.NewStyle().Foreground(colorText)
 
 	var sb strings.Builder
 

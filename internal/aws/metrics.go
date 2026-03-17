@@ -27,8 +27,8 @@ func (c *Client) GetServiceMetrics(ctx context.Context, cluster string, serviceN
 	endTime := time.Now()
 	startTime := endTime.Add(-5 * time.Minute)
 
-	var queries []cwtypes.MetricDataQuery
-	queryIDMap := make(map[string]string) // queryID -> serviceName
+	queries := make([]cwtypes.MetricDataQuery, 0, len(serviceNames)*2)
+	queryIDMap := make(map[string]string, len(serviceNames)*2) // queryID -> serviceName
 
 	for i, svcName := range serviceNames {
 		result[svcName] = &ServiceMetrics{}

@@ -153,7 +153,7 @@ func (c *Client) GetLogEvents(ctx context.Context, logGroup, logStream, nextToke
 		return nil, "", fmt.Errorf("getting log events: %w", err)
 	}
 
-	var events []LogEvent
+	events := make([]LogEvent, 0, len(out.Events))
 	for _, e := range out.Events {
 		events = append(events, LogEvent{
 			Timestamp: time.UnixMilli(awslib.ToInt64(e.Timestamp)),

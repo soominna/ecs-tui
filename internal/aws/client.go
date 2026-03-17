@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
@@ -60,6 +59,11 @@ func ListProfiles() ([]string, error) {
 	var profiles []string
 	for _, fname := range []string{"config", "credentials"} {
 		p := filepath.Join(home, ".aws", fname)
+		// Check that the file is a regular file (not a symlink)
+		info, err := os.Lstat(p)
+		if err != nil || !info.Mode().IsRegular() {
+			continue
+		}
 		f, err := os.Open(p)
 		if err != nil {
 			continue
@@ -74,6 +78,10 @@ func ListProfiles() ([]string, error) {
 					profiles = append(profiles, section)
 				}
 			}
+		}
+		if err := scanner.Err(); err != nil {
+			f.Close()
+			continue
 		}
 		f.Close()
 	}
@@ -172,13 +180,3 @@ func CommonRegions() []string {
 	}
 }
 
-func StringVal(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-func StringPtr(s string) *string {
-	return aws.String(s)
-}
