@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -52,7 +51,7 @@ func (v *ServiceEventsView) Init() tea.Cmd {
 	cluster := v.cluster
 	serviceName := v.serviceName
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		events, err := client.GetServiceEvents(ctx, cluster, serviceName)
 		if err != nil {

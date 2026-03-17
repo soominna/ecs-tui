@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/table"
@@ -121,7 +122,7 @@ func (v *ServiceView) fetchServices() tea.Cmd {
 	client := v.client
 	cluster := v.cluster
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		services, err := client.ListServices(ctx, cluster)
 		if err != nil {
@@ -137,21 +138,42 @@ func (v *ServiceView) fetchTaskDefs() tea.Cmd {
 	copy(services, v.services)
 	client := v.client
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
-		defs := make(map[string]*awsclient.TaskDefinitionInfo)
+
+		// Collect unique task definitions to fetch
+		var unique []string
 		seen := make(map[string]bool)
 		for _, svc := range services {
 			if svc.TaskDef == "" || seen[svc.TaskDef] {
 				continue
 			}
 			seen[svc.TaskDef] = true
-			td, err := client.DescribeTaskDefinition(ctx, svc.TaskDef)
-			if err != nil {
-				continue
-			}
-			defs[svc.TaskDef] = td
+			unique = append(unique, svc.TaskDef)
 		}
+
+		// Fetch in parallel with bounded concurrency
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		defs := make(map[string]*awsclient.TaskDefinitionInfo)
+		sem := make(chan struct{}, 5) // max 5 concurrent API calls
+
+		for _, taskDef := range unique {
+			wg.Add(1)
+			go func(td string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				info, err := client.DescribeTaskDefinition(ctx, td)
+				if err != nil {
+					return
+				}
+				mu.Lock()
+				defs[td] = info
+				mu.Unlock()
+			}(taskDef)
+		}
+		wg.Wait()
 		return taskDefsLoadedMsg{defs: defs}
 	}
 }
@@ -165,7 +187,7 @@ func (v *ServiceView) fetchMetrics() tea.Cmd {
 	client := v.client
 	cluster := v.cluster
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		metrics, err := client.GetServiceMetrics(ctx, cluster, names)
 		if err != nil {
@@ -253,7 +275,7 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				switch action {
 				case "force-deploy":
 					return v, func() tea.Msg {
-						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 						defer cancel()
 						err := client.ForceNewDeployment(ctx, cluster, svcName)
 						if err != nil {
@@ -263,7 +285,7 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				case "update-count":
 					return v, func() tea.Msg {
-						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 						defer cancel()
 						err := client.UpdateDesiredCount(ctx, cluster, svcName, count)
 						if err != nil {

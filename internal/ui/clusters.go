@@ -2,7 +2,6 @@ package ui
 
 import (
 	"context"
-	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -52,7 +51,7 @@ func (v *ClusterView) Init() tea.Cmd {
 func (v *ClusterView) fetchClusters() tea.Cmd {
 	client := v.client
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		clusters, err := client.ListClusters(ctx)
 		if err != nil {

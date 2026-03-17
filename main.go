@@ -50,8 +50,8 @@ func main() {
 			client = nil
 		} else {
 			if err := awsclient.SaveLastSession(*profile, *region, ui.CurrentThemeName()); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
-		}
+				fmt.Fprintf(os.Stderr, "Warning: could not save session: %v\n", err)
+			}
 		}
 	}
 

@@ -1,0 +1,205 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1773720196143,
+  "projectRoot": "/Users/admin/Desktop/officenote_project/ecs-tui",
+  "techStack": {
+    "languages": [
+      {
+        "name": "Go",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "go.mod"
+        ]
+      },
+      {
+        "name": "C/C++",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "Makefile"
+        ]
+      }
+    ],
+    "frameworks": [],
+    "packageManager": "go",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "make build",
+    "testCommand": "make test",
+    "lintCommand": null,
+    "devCommand": null,
+    "scripts": {}
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [],
+    "gitBranches": null
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "cmd": {
+      "path": "cmd",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1773720196127,
+      "keyFiles": []
+    },
+    "internal": {
+      "path": "internal",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1773720196131,
+      "keyFiles": []
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "internal/ui/logs.go",
+      "accessCount": 6,
+      "lastAccessed": 1773723598663,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/detail.go",
+      "accessCount": 6,
+      "lastAccessed": 1773723657969,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/events.go",
+      "accessCount": 6,
+      "lastAccessed": 1773723658773,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/clusters.go",
+      "accessCount": 6,
+      "lastAccessed": 1773723659965,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/services.go",
+      "accessCount": 6,
+      "lastAccessed": 1773723705514,
+      "type": "file"
+    },
+    {
+      "path": "internal/aws/client.go",
+      "accessCount": 5,
+      "lastAccessed": 1773723590652,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 4,
+      "lastAccessed": 1773722977503,
+      "type": "directory"
+    },
+    {
+      "path": "main.go",
+      "accessCount": 4,
+      "lastAccessed": 1773723488516,
+      "type": "file"
+    },
+    {
+      "path": "internal/aws/logs.go",
+      "accessCount": 4,
+      "lastAccessed": 1773723551464,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/app.go",
+      "accessCount": 4,
+      "lastAccessed": 1773723666877,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/common.go",
+      "accessCount": 3,
+      "lastAccessed": 1773723563297,
+      "type": "file"
+    },
+    {
+      "path": "internal/aws/ecs.go",
+      "accessCount": 3,
+      "lastAccessed": 1773723578278,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/tasks.go",
+      "accessCount": 3,
+      "lastAccessed": 1773723597872,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/theme.go",
+      "accessCount": 2,
+      "lastAccessed": 1773723268359,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/styles.go",
+      "accessCount": 2,
+      "lastAccessed": 1773723268411,
+      "type": "file"
+    },
+    {
+      "path": "internal/aws/metrics.go",
+      "accessCount": 1,
+      "lastAccessed": 1773722284678,
+      "type": "file"
+    },
+    {
+      "path": "internal/aws/session.go",
+      "accessCount": 1,
+      "lastAccessed": 1773722287892,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/help.go",
+      "accessCount": 1,
+      "lastAccessed": 1773722332068,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/config.go",
+      "accessCount": 1,
+      "lastAccessed": 1773722348454,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui/exec_hint.go",
+      "accessCount": 1,
+      "lastAccessed": 1773722360697,
+      "type": "file"
+    },
+    {
+      "path": "internal/exec/exec.go",
+      "accessCount": 1,
+      "lastAccessed": 1773722364642,
+      "type": "file"
+    },
+    {
+      "path": "go.mod",
+      "accessCount": 1,
+      "lastAccessed": 1773722370411,
+      "type": "file"
+    },
+    {
+      "path": "internal/ui",
+      "accessCount": 1,
+      "lastAccessed": 1773723603932,
+      "type": "directory"
+    }
+  ],
+  "userDirectives": []
+}

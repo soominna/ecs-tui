@@ -37,10 +37,11 @@ func (c *Client) GetLogInfo(ctx context.Context, taskDefARN, containerName, task
 		logStream = fmt.Sprintf("%s/%s/%s", td.LogPrefix, containerName, taskID)
 	}
 
-	// Get the log group ARN
+	// Get the log group ARN — use a higher limit because prefix match may
+	// return unrelated groups before the exact match (alphabetical order).
 	descOut, err := c.Logs.DescribeLogGroups(ctx, &cloudwatchlogs.DescribeLogGroupsInput{
 		LogGroupNamePrefix: awslib.String(td.LogGroup),
-		Limit:              awslib.Int32(1),
+		Limit:              awslib.Int32(50),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("describing log group: %w", err)
@@ -92,6 +93,10 @@ func (c *Client) GetLogInfo(ctx context.Context, taskDefARN, containerName, task
 	}, nil
 }
 
+// StartLiveTail opens a streaming live tail session and writes events to eventCh.
+// A background goroutine reads from the AWS stream until ctx is cancelled or the
+// stream closes. The caller MUST cancel ctx (e.g. via LogView.Close) to avoid
+// leaking the goroutine and the underlying HTTP connection.
 func (c *Client) StartLiveTail(ctx context.Context, logGroupARN string, logStreamNames []string, filterPattern string, eventCh chan<- LogEvent) error {
 	input := &cloudwatchlogs.StartLiveTailInput{
 		LogGroupIdentifiers: []string{logGroupARN},

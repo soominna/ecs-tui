@@ -46,6 +46,15 @@ type logEventMsg struct {
 
 type logStreamEndMsg struct{}
 
+type liveTailStartedMsg struct {
+	eventCh chan awsclient.LogEvent
+	cancel  context.CancelFunc
+}
+
+type liveTailFailedMsg struct {
+	err error
+}
+
 type logPollTickMsg time.Time
 
 type logEventsMsg struct {
@@ -89,7 +98,7 @@ func (v *LogView) fetchLogInfo() tea.Cmd {
 	containerName := v.task.ContainerName
 	taskID := v.task.TaskID
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		info, err := client.GetLogInfo(ctx, taskDefARN, containerName, taskID)
 		if err != nil {
@@ -100,26 +109,26 @@ func (v *LogView) fetchLogInfo() tea.Cmd {
 }
 
 func (v *LogView) startLiveTail() tea.Cmd {
-	ctx, cancel := context.WithCancel(context.Background())
-	v.cancel = cancel
-	v.eventCh = make(chan awsclient.LogEvent, 100)
+	client := v.client
+	logGroupARN := v.logInfo.LogGroupARN
+	logStream := v.logInfo.LogStream
 
-	streamNames := []string{}
-	if v.logInfo.LogStream != "" {
-		streamNames = []string{v.logInfo.LogStream}
-	}
+	return func() tea.Msg {
+		ctx, cancel := context.WithCancel(context.Background())
+		eventCh := make(chan awsclient.LogEvent, 100)
 
-	err := v.client.StartLiveTail(ctx, v.logInfo.LogGroupARN, streamNames, "", v.eventCh)
-	if err != nil {
-		cancel()
-		v.cancel = nil
-		v.eventCh = nil
-		v.logLines = append(v.logLines, fmt.Sprintf("LiveTail unavailable: %v", err))
-		v.updateViewport()
-		return nil
+		streamNames := []string{}
+		if logStream != "" {
+			streamNames = []string{logStream}
+		}
+
+		err := client.StartLiveTail(ctx, logGroupARN, streamNames, "", eventCh)
+		if err != nil {
+			cancel()
+			return liveTailFailedMsg{err: err}
+		}
+		return liveTailStartedMsg{eventCh: eventCh, cancel: cancel}
 	}
-	v.streaming = true
-	return waitForLogEvent(v.eventCh)
 }
 
 func waitForLogEvent(ch <-chan awsclient.LogEvent) tea.Cmd {
@@ -149,7 +158,7 @@ func (v *LogView) pollLogs() tea.Cmd {
 	logStream := v.logInfo.LogStream
 	nextToken := v.nextToken
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		events, newToken, err := client.GetLogEvents(ctx, logGroup, logStream, nextToken, 100)
 		if err != nil {
@@ -217,14 +226,9 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.logLines = append(v.logLines, "---")
 		v.updateViewport()
 
-		// Try LiveTail first (works even without specific stream)
+		// Try LiveTail first (runs asynchronously via tea.Cmd)
 		if v.logInfo.LogGroupARN != "" {
-			cmd := v.startLiveTail()
-			if cmd != nil {
-				v.logLines = append(v.logLines, "Streaming (LiveTail)...")
-				v.updateViewport()
-				return v, cmd
-			}
+			return v, v.startLiveTail()
 		}
 		// Fallback to polling — requires logStream
 		if v.logInfo.LogStream != "" {
@@ -235,6 +239,25 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// No stream available
 		v.logLines = append(v.logLines, "No log stream found. Check task definition log configuration.")
 		v.updateViewport()
+		return v, nil
+
+	case liveTailStartedMsg:
+		v.cancel = msg.cancel
+		v.eventCh = msg.eventCh
+		v.streaming = true
+		v.logLines = append(v.logLines, "Streaming (LiveTail)...")
+		v.updateViewport()
+		return v, waitForLogEvent(v.eventCh)
+
+	case liveTailFailedMsg:
+		v.logLines = append(v.logLines, fmt.Sprintf("LiveTail unavailable: %v", msg.err))
+		v.updateViewport()
+		// Fallback to polling
+		if v.logInfo != nil && v.logInfo.LogStream != "" {
+			v.logLines = append(v.logLines, "Streaming (polling fallback)...")
+			v.updateViewport()
+			return v, v.startPolling()
+		}
 		return v, nil
 
 	case logEventMsg:

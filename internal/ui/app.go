@@ -177,7 +177,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case AWSConfigChangedMsg:
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		client, err := awsclient.NewClient(ctx, msg.Profile, msg.Region)
 		if err != nil {

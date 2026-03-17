@@ -1,6 +1,13 @@
 package ui
 
-import tea "github.com/charmbracelet/bubbletea"
+import (
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// apiTimeout is the default timeout for AWS API calls.
+const apiTimeout = 30 * time.Second
 
 // View is the interface all views must implement.
 type View interface {

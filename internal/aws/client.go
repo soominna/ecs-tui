@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -13,6 +14,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 )
+
+var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+-\d+)$`)
 
 type Client struct {
 	ECS     *ecs.Client
@@ -79,11 +82,8 @@ func ListProfiles() ([]string, error) {
 				}
 			}
 		}
-		if err := scanner.Err(); err != nil {
-			f.Close()
-			continue
-		}
 		f.Close()
+		// Keep profiles parsed so far even if scanner encountered an error
 	}
 
 	seen := make(map[string]bool)
@@ -151,7 +151,11 @@ func readRegionFromConfig(profile string) string {
 		if inSection && strings.HasPrefix(line, "region") {
 			parts := strings.SplitN(line, "=", 2)
 			if len(parts) == 2 {
-				return strings.TrimSpace(parts[1])
+				region := strings.TrimSpace(parts[1])
+				if regionPattern.MatchString(region) {
+					return region
+				}
+				return ""
 			}
 		}
 	}

@@ -209,53 +209,55 @@ func (c *Client) ListTasks(ctx context.Context, cluster, service string) ([]Task
 	return tasks, nil
 }
 
-func (c *Client) DescribeTaskDefinition(ctx context.Context, taskDefARN string) (*TaskDefinitionInfo, error) {
+// describeTaskDef is a shared helper that calls DescribeTaskDefinition and
+// returns the raw output along with a partially filled TaskDefinitionInfo.
+func (c *Client) describeTaskDef(ctx context.Context, taskDefARN string) (*ecs.DescribeTaskDefinitionOutput, *TaskDefinitionInfo, error) {
 	out, err := c.ECS.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
 		TaskDefinition: aws.String(taskDefARN),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("describing task definition: %w", err)
+		return nil, nil, fmt.Errorf("describing task definition: %w", err)
 	}
-
 	td := out.TaskDefinition
 	info := &TaskDefinitionInfo{
 		Family: aws.ToString(td.Family),
 		CPU:    aws.ToString(td.Cpu),
 		Memory: aws.ToString(td.Memory),
 	}
+	return out, info, nil
+}
 
-	// Extract log config from first container that has awslogs
-	for _, cd := range td.ContainerDefinitions {
+// applyLogConfig sets LogGroup/LogPrefix from the first awslogs container definition.
+func applyLogConfig(info *TaskDefinitionInfo, containers []ecstypes.ContainerDefinition) {
+	for _, cd := range containers {
 		if cd.LogConfiguration != nil && cd.LogConfiguration.LogDriver == ecstypes.LogDriverAwslogs {
 			opts := cd.LogConfiguration.Options
 			info.LogGroup = opts["awslogs-group"]
 			info.LogPrefix = opts["awslogs-stream-prefix"]
-			break
+			return
 		}
 	}
+}
 
+func (c *Client) DescribeTaskDefinition(ctx context.Context, taskDefARN string) (*TaskDefinitionInfo, error) {
+	out, info, err := c.describeTaskDef(ctx, taskDefARN)
+	if err != nil {
+		return nil, err
+	}
+	applyLogConfig(info, out.TaskDefinition.ContainerDefinitions)
 	return info, nil
 }
 
 // DescribeTaskDefinitionForContainer returns task def info with log config
 // matched to a specific container name.
 func (c *Client) DescribeTaskDefinitionForContainer(ctx context.Context, taskDefARN, containerName string) (*TaskDefinitionInfo, error) {
-	out, err := c.ECS.DescribeTaskDefinition(ctx, &ecs.DescribeTaskDefinitionInput{
-		TaskDefinition: aws.String(taskDefARN),
-	})
+	out, info, err := c.describeTaskDef(ctx, taskDefARN)
 	if err != nil {
-		return nil, fmt.Errorf("describing task definition: %w", err)
-	}
-
-	td := out.TaskDefinition
-	info := &TaskDefinitionInfo{
-		Family: aws.ToString(td.Family),
-		CPU:    aws.ToString(td.Cpu),
-		Memory: aws.ToString(td.Memory),
+		return nil, err
 	}
 
 	// First try: match by container name
-	for _, cd := range td.ContainerDefinitions {
+	for _, cd := range out.TaskDefinition.ContainerDefinitions {
 		if aws.ToString(cd.Name) == containerName {
 			if cd.LogConfiguration != nil && cd.LogConfiguration.LogDriver == ecstypes.LogDriverAwslogs {
 				opts := cd.LogConfiguration.Options
@@ -267,15 +269,7 @@ func (c *Client) DescribeTaskDefinitionForContainer(ctx context.Context, taskDef
 	}
 
 	// Fallback: use first container with awslogs
-	for _, cd := range td.ContainerDefinitions {
-		if cd.LogConfiguration != nil && cd.LogConfiguration.LogDriver == ecstypes.LogDriverAwslogs {
-			opts := cd.LogConfiguration.Options
-			info.LogGroup = opts["awslogs-group"]
-			info.LogPrefix = opts["awslogs-stream-prefix"]
-			break
-		}
-	}
-
+	applyLogConfig(info, out.TaskDefinition.ContainerDefinitions)
 	return info, nil
 }
 

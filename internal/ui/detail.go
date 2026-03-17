@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -50,7 +49,7 @@ func (v *DetailView) Init() tea.Cmd {
 	client := v.client
 	taskDefARN := v.task.TaskDefARN
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		td, err := client.DescribeTaskDefinition(ctx, taskDefARN)
 		if err != nil {

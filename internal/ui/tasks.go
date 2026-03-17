@@ -97,7 +97,7 @@ func (v *TaskView) fetchTasks() tea.Cmd {
 	cluster := v.cluster
 	service := v.service
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		tasks, err := client.ListTasks(ctx, cluster, service)
 		if err != nil {
@@ -173,7 +173,7 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.confirmMsg = ""
 				if action == "stop-task" {
 					return v, func() tea.Msg {
-						ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+						ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 						defer cancel()
 						err := client.StopTask(ctx, cluster, taskARN, "Stopped via ECS-TUI")
 						if err != nil {
