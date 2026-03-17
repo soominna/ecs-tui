@@ -360,19 +360,7 @@ func (v *ConfigView) buildRegionList() {
 }
 
 func (v *ConfigView) newList(items []list.Item, title string) list.Model {
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(colorText).
-		Background(colorSurface0).
-		BorderLeftForeground(colorBlue)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(colorSubtext0).
-		Background(colorSurface0).
-		BorderLeftForeground(colorBlue)
-	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
-		Foreground(colorSubtext1)
-	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
-		Foreground(colorOverlay1)
+	delegate := NewThemedDelegate()
 
 	l := list.New(items, delegate, v.width, v.listHeight())
 	l.Title = title

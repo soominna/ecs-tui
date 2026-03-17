@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 )
 
-var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+-\d+)$`)
+var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
 
 type Client struct {
 	ECS     *ecs.Client
@@ -82,8 +82,7 @@ func ListProfiles() ([]string, error) {
 				}
 			}
 		}
-		f.Close()
-		// Keep profiles parsed so far even if scanner encountered an error
+		f.Close() // safe: no early returns in this block; scanner errors are non-fatal
 	}
 
 	seen := make(map[string]bool)
@@ -181,6 +180,9 @@ func CommonRegions() []string {
 		"eu-north-1",
 		"sa-east-1",
 		"ca-central-1",
+		"us-gov-west-1",
+		"us-gov-east-1",
+		"cn-north-1",
+		"cn-northwest-1",
 	}
 }
-

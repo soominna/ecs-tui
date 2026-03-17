@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 
+	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -10,27 +11,27 @@ import (
 // ─── Catppuccin Palette (set by ApplyTheme in theme.go) ─────────────────────
 
 var (
-	colorCrust    lipgloss.Color
-	colorMantle   lipgloss.Color
-	colorBase     lipgloss.Color
-	colorSurface0 lipgloss.Color
-	colorSurface1 lipgloss.Color
-	colorSurface2 lipgloss.Color
-	colorOverlay0 lipgloss.Color
-	colorOverlay1 lipgloss.Color
-	colorSubtext0 lipgloss.Color
-	colorSubtext1 lipgloss.Color
-	colorText     lipgloss.Color
-	colorBlue     lipgloss.Color
-	colorLavender lipgloss.Color
-	colorSapphire lipgloss.Color
-	colorGreen    lipgloss.Color
-	colorTeal     lipgloss.Color
-	colorRed      lipgloss.Color
-	colorMaroon   lipgloss.Color
-	colorPeach    lipgloss.Color
-	colorYellow   lipgloss.Color
-	colorMauve    lipgloss.Color
+	colorCrust     lipgloss.Color
+	colorMantle    lipgloss.Color
+	colorBase      lipgloss.Color
+	colorSurface0  lipgloss.Color
+	colorSurface1  lipgloss.Color
+	colorSurface2  lipgloss.Color
+	colorOverlay0  lipgloss.Color
+	colorOverlay1  lipgloss.Color
+	colorSubtext0  lipgloss.Color
+	colorSubtext1  lipgloss.Color
+	colorText      lipgloss.Color
+	colorBlue      lipgloss.Color
+	colorLavender  lipgloss.Color
+	colorSapphire  lipgloss.Color
+	colorGreen     lipgloss.Color
+	colorTeal      lipgloss.Color
+	colorRed       lipgloss.Color
+	colorMaroon    lipgloss.Color
+	colorPeach     lipgloss.Color
+	colorYellow    lipgloss.Color
+	colorMauve     lipgloss.Color
 	colorRosewater lipgloss.Color
 )
 
@@ -49,22 +50,22 @@ var (
 // ─── Shared Styles (set by ApplyTheme) ──────────────────────────────────────
 
 var (
-	headerStyle       lipgloss.Style
-	footerStyle       lipgloss.Style
-	shortcutKeyStyle  lipgloss.Style
-	shortcutDescStyle lipgloss.Style
-	errorStyle        lipgloss.Style
-	statusStyle       lipgloss.Style
-	StatusRunning     lipgloss.Style
-	StatusStopped     lipgloss.Style
-	StatusPending     lipgloss.Style
-	StatusActive      lipgloss.Style
-	titleStyle        lipgloss.Style
-	sectionTitleStyle lipgloss.Style
-	breadcrumbStyle   lipgloss.Style
+	headerStyle           lipgloss.Style
+	footerStyle           lipgloss.Style
+	shortcutKeyStyle      lipgloss.Style
+	shortcutDescStyle     lipgloss.Style
+	errorStyle            lipgloss.Style
+	statusStyle           lipgloss.Style
+	StatusRunning         lipgloss.Style
+	StatusStopped         lipgloss.Style
+	StatusPending         lipgloss.Style
+	StatusActive          lipgloss.Style
+	titleStyle            lipgloss.Style
+	sectionTitleStyle     lipgloss.Style
+	breadcrumbStyle       lipgloss.Style
 	breadcrumbActiveStyle lipgloss.Style
 	breadcrumbSepStyle    lipgloss.Style
-	loadingStyle      lipgloss.Style
+	loadingStyle          lipgloss.Style
 )
 
 // ─── Table Styles (reusable) ────────────────────────────────────────────────
@@ -199,6 +200,24 @@ func OverlayBoxStyle() lipgloss.Style {
 		BorderForeground(colorBlue).
 		Padding(1, 3).
 		Width(44)
+}
+
+// NewThemedDelegate returns a list delegate with the current theme's colors applied.
+func NewThemedDelegate() list.DefaultDelegate {
+	delegate := list.NewDefaultDelegate()
+	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
+		Foreground(colorText).
+		Background(colorSurface0).
+		BorderLeftForeground(colorBlue)
+	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
+		Foreground(colorSubtext0).
+		Background(colorSurface0).
+		BorderLeftForeground(colorBlue)
+	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
+		Foreground(colorSubtext1)
+	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
+		Foreground(colorOverlay1)
+	return delegate
 }
 
 // StatusColor returns styled text based on status.

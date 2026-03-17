@@ -26,6 +26,7 @@ type ServiceView struct {
 	width       int
 	height      int
 	loaded      bool
+	lastUpdated time.Time
 	filterInput textinput.Model
 	filtering   bool
 	filterText  string
@@ -44,7 +45,8 @@ type servicesLoadedMsg struct {
 }
 
 type taskDefsLoadedMsg struct {
-	defs map[string]*awsclient.TaskDefinitionInfo
+	defs   map[string]*awsclient.TaskDefinitionInfo
+	errors []string
 }
 
 type serviceMetricsLoadedMsg struct {
@@ -156,6 +158,7 @@ func (v *ServiceView) fetchTaskDefs() tea.Cmd {
 		var mu sync.Mutex
 		var wg sync.WaitGroup
 		defs := make(map[string]*awsclient.TaskDefinitionInfo)
+		var fetchErrors []string
 		sem := make(chan struct{}, 5) // max 5 concurrent API calls
 
 		for _, taskDef := range unique {
@@ -165,16 +168,17 @@ func (v *ServiceView) fetchTaskDefs() tea.Cmd {
 				sem <- struct{}{}
 				defer func() { <-sem }()
 				info, err := client.DescribeTaskDefinition(ctx, td)
+				mu.Lock()
+				defer mu.Unlock()
 				if err != nil {
+					fetchErrors = append(fetchErrors, fmt.Sprintf("%s: %v", td, err))
 					return
 				}
-				mu.Lock()
 				defs[td] = info
-				mu.Unlock()
 			}(taskDef)
 		}
 		wg.Wait()
-		return taskDefsLoadedMsg{defs: defs}
+		return taskDefsLoadedMsg{defs: defs, errors: fetchErrors}
 	}
 }
 
@@ -227,12 +231,18 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case servicesLoadedMsg:
 		v.services = msg.services
 		v.loaded = true
+		v.lastUpdated = time.Now()
 		v.rebuildTable()
 		return v, tea.Batch(v.fetchTaskDefs(), v.fetchMetrics())
 
 	case taskDefsLoadedMsg:
 		v.taskDefs = msg.defs
 		v.rebuildTable()
+		if len(msg.errors) > 0 {
+			return v, func() tea.Msg {
+				return ErrorMsg{Err: fmt.Errorf("failed to fetch %d task definition(s)", len(msg.errors))}
+			}
+		}
 		return v, nil
 
 	case serviceMetricsLoadedMsg:
@@ -396,7 +406,7 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.filterInput.Focus()
 			return v, textinput.Blink
 		case "r":
-			v.loaded = false
+			// Refresh in-place without clearing the table (same as auto-refresh)
 			return v, v.fetchServices()
 		case "esc":
 			if v.filterText != "" {
@@ -424,6 +434,14 @@ func (v *ServiceView) View() string {
 
 	var sb strings.Builder
 
+	// Last updated indicator
+	if !v.lastUpdated.IsZero() {
+		ago := time.Since(v.lastUpdated).Truncate(time.Second)
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render(
+			fmt.Sprintf("  Updated %s ago", ago)))
+		sb.WriteString("\n")
+	}
+
 	// Filter bar (inline — not modal)
 	if v.filtering {
 		sb.WriteString("  Filter: ")
@@ -433,6 +451,14 @@ func (v *ServiceView) View() string {
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render(
 			fmt.Sprintf("  Filter: %s (press Esc to clear)", v.filterText)))
 		sb.WriteString("\n")
+	}
+
+	// Empty state
+	if len(v.services) == 0 {
+		sb.WriteString("\n")
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Italic(true).Render(
+			"  No services found in this cluster.\n  Press Esc to go back or r to refresh."))
+		return sb.String()
 	}
 
 	sb.WriteString(v.table.View())
@@ -526,7 +552,7 @@ func (v *ServiceView) rebuildTable() {
 		})
 	}
 
-	tableHeight := v.height - 2
+	tableHeight := v.height - 3 // -1 for updated line, -2 for table padding
 	if v.filtering || v.filterText != "" {
 		tableHeight -= 2
 	}

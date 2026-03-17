@@ -121,19 +121,7 @@ func (v *ClusterView) rebuildList() {
 	for _, cl := range v.clusters {
 		items = append(items, clusterItem{info: cl})
 	}
-	delegate := list.NewDefaultDelegate()
-	delegate.Styles.SelectedTitle = delegate.Styles.SelectedTitle.
-		Foreground(colorText).
-		Background(colorSurface0).
-		BorderLeftForeground(colorBlue)
-	delegate.Styles.SelectedDesc = delegate.Styles.SelectedDesc.
-		Foreground(colorSubtext0).
-		Background(colorSurface0).
-		BorderLeftForeground(colorBlue)
-	delegate.Styles.NormalTitle = delegate.Styles.NormalTitle.
-		Foreground(colorSubtext1)
-	delegate.Styles.NormalDesc = delegate.Styles.NormalDesc.
-		Foreground(colorOverlay1)
+	delegate := NewThemedDelegate()
 	v.list = list.New(items, delegate, v.width, v.height)
 	v.list.Title = "ECS Clusters"
 	v.list.Styles.Title = titleStyle.Padding(0, 1)
@@ -145,6 +133,9 @@ func (v *ClusterView) rebuildList() {
 func (v *ClusterView) View() string {
 	if !v.loaded {
 		return loadingStyle.Render("  Loading clusters...")
+	}
+	if len(v.clusters) == 0 {
+		return loadingStyle.Render("  No ECS clusters found in this region.\n  Press P to change profile/region or Esc to quit.")
 	}
 	return v.list.View()
 }

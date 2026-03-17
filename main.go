@@ -27,6 +27,11 @@ func main() {
 		os.Exit(0)
 	}
 
+	if *service != "" && *cluster == "" {
+		fmt.Fprintln(os.Stderr, "Error: --service requires --cluster")
+		os.Exit(1)
+	}
+
 	var client *awsclient.Client
 	var err error
 
@@ -47,6 +52,7 @@ func main() {
 		client, err = awsclient.NewClient(context.Background(), *profile, *region)
 		if err != nil {
 			// Don't exit — fall through to ConfigView so user can fix settings
+			fmt.Fprintf(os.Stderr, "Warning: could not connect to AWS (%v), opening config view...\n", err)
 			client = nil
 		} else {
 			if err := awsclient.SaveLastSession(*profile, *region, ui.CurrentThemeName()); err != nil {

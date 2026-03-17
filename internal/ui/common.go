@@ -4,6 +4,8 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	awsclient "github.com/soominna/ecs-tui/internal/aws"
 )
 
 // apiTimeout is the default timeout for AWS API calls.
@@ -61,5 +63,22 @@ type ClusterSelectedMsg struct {
 	ClusterName string
 }
 
+// AccessDeniedMsg signals an IAM permission error with guidance.
+type AccessDeniedMsg struct {
+	Err error
+}
+
 // themeChangedMsg signals that the dark/light theme was toggled.
 type themeChangedMsg struct{}
+
+// awsClientReadyMsg signals that a new AWS client was created successfully.
+type awsClientReadyMsg struct {
+	Client  *awsclient.Client
+	Profile string
+	Region  string
+}
+
+// awsClientErrorMsg signals that AWS client creation failed.
+type awsClientErrorMsg struct {
+	Err error
+}

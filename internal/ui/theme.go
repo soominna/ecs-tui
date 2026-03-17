@@ -14,27 +14,27 @@ const (
 
 // palette holds Catppuccin color values for a single theme variant.
 type palette struct {
-	Crust    lipgloss.Color
-	Mantle   lipgloss.Color
-	Base     lipgloss.Color
-	Surface0 lipgloss.Color
-	Surface1 lipgloss.Color
-	Surface2 lipgloss.Color
-	Overlay0 lipgloss.Color
-	Overlay1 lipgloss.Color
-	Subtext0 lipgloss.Color
-	Subtext1 lipgloss.Color
-	Text     lipgloss.Color
-	Blue     lipgloss.Color
-	Lavender lipgloss.Color
-	Sapphire lipgloss.Color
-	Green    lipgloss.Color
-	Teal     lipgloss.Color
-	Red      lipgloss.Color
-	Maroon   lipgloss.Color
-	Peach    lipgloss.Color
-	Yellow   lipgloss.Color
-	Mauve    lipgloss.Color
+	Crust     lipgloss.Color
+	Mantle    lipgloss.Color
+	Base      lipgloss.Color
+	Surface0  lipgloss.Color
+	Surface1  lipgloss.Color
+	Surface2  lipgloss.Color
+	Overlay0  lipgloss.Color
+	Overlay1  lipgloss.Color
+	Subtext0  lipgloss.Color
+	Subtext1  lipgloss.Color
+	Text      lipgloss.Color
+	Blue      lipgloss.Color
+	Lavender  lipgloss.Color
+	Sapphire  lipgloss.Color
+	Green     lipgloss.Color
+	Teal      lipgloss.Color
+	Red       lipgloss.Color
+	Maroon    lipgloss.Color
+	Peach     lipgloss.Color
+	Yellow    lipgloss.Color
+	Mauve     lipgloss.Color
 	Rosewater lipgloss.Color
 }
 
@@ -102,9 +102,9 @@ func CurrentThemeName() string {
 
 // ToggleTheme switches between Mocha (dark) and Latte (light).
 func ToggleTheme() {
-	themeMu.RLock()
+	themeMu.Lock()
 	current := currentTheme
-	themeMu.RUnlock()
+	themeMu.Unlock()
 	if current == ThemeMocha {
 		ApplyTheme(ThemeLatte)
 	} else {

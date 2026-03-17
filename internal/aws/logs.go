@@ -70,7 +70,15 @@ func (c *Client) GetLogInfo(ctx context.Context, taskDefARN, containerName, task
 			Descending:   awslib.Bool(true),
 			Limit:        awslib.Int32(10),
 		})
-		if err == nil && len(streams.LogStreams) > 0 {
+		if err != nil {
+			// Non-fatal: return what we have so far (LiveTail may still work)
+			return &LogInfo{
+				LogGroup:    td.LogGroup,
+				LogGroupARN: logGroupARN,
+				LogStream:   "",
+			}, nil
+		}
+		if len(streams.LogStreams) > 0 {
 			// Try to find a stream matching this taskID
 			for _, s := range streams.LogStreams {
 				name := awslib.ToString(s.LogStreamName)
@@ -129,9 +137,13 @@ func (c *Client) StartLiveTail(ctx context.Context, logGroupARN string, logStrea
 				switch v := event.(type) {
 				case *logstypes.StartLiveTailResponseStreamMemberSessionUpdate:
 					for _, le := range v.Value.SessionResults {
-						eventCh <- LogEvent{
+						select {
+						case eventCh <- LogEvent{
 							Timestamp: time.UnixMilli(awslib.ToInt64(le.Timestamp)),
 							Message:   awslib.ToString(le.Message),
+						}:
+						case <-ctx.Done():
+							return
 						}
 					}
 				}

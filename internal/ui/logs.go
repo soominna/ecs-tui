@@ -26,14 +26,17 @@ type LogView struct {
 	autoScroll bool
 	streaming  bool
 	logInfo    *awsclient.LogInfo
+	closed     bool
 
 	// LiveTail
 	eventCh chan awsclient.LogEvent
 	cancel  context.CancelFunc
 
 	// Polling fallback
-	nextToken string
-	polling   bool
+	nextToken  string
+	polling    bool
+	pollCtx    context.Context
+	pollCancel context.CancelFunc
 }
 
 type logInfoMsg struct {
@@ -80,8 +83,12 @@ func (v *LogView) Title() string {
 }
 
 func (v *LogView) ShortcutHelp() []Shortcut {
+	followDesc := "Follow (off)"
+	if v.autoScroll {
+		followDesc = "Follow (on)"
+	}
 	return []Shortcut{
-		{Key: "f", Desc: "Follow"},
+		{Key: "f", Desc: followDesc},
 		{Key: "G", Desc: "Bottom"},
 		{Key: "g", Desc: "Top"},
 		{Key: "Esc", Desc: "Back"},
@@ -143,7 +150,11 @@ func waitForLogEvent(ch <-chan awsclient.LogEvent) tea.Cmd {
 
 func (v *LogView) startPolling() tea.Cmd {
 	v.polling = true
-	return tea.Batch(v.pollLogs(), v.pollTickCmd())
+	// Create a cancellable context for polling; cancelled by Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	v.pollCtx = ctx
+	v.pollCancel = cancel
+	return tea.Batch(v.pollLogsWithCtx(ctx), v.pollTickCmd())
 }
 
 func (v *LogView) pollTickCmd() tea.Cmd {
@@ -152,16 +163,20 @@ func (v *LogView) pollTickCmd() tea.Cmd {
 	})
 }
 
-func (v *LogView) pollLogs() tea.Cmd {
+func (v *LogView) pollLogsWithCtx(parentCtx context.Context) tea.Cmd {
 	client := v.client
 	logGroup := v.logInfo.LogGroup
 	logStream := v.logInfo.LogStream
 	nextToken := v.nextToken
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+		ctx, cancel := context.WithTimeout(parentCtx, apiTimeout)
 		defer cancel()
 		events, newToken, err := client.GetLogEvents(ctx, logGroup, logStream, nextToken, 100)
 		if err != nil {
+			// If the parent context was cancelled (view closed), silently drop
+			if parentCtx.Err() != nil {
+				return nil
+			}
 			return ErrorMsg{Err: err}
 		}
 		return logEventsMsg{events: events, nextToken: newToken}
@@ -192,11 +207,16 @@ func (v *LogView) updateViewport() {
 
 // Close implements the Closeable interface for cleanup on stack removal.
 func (v *LogView) Close() {
+	v.closed = true
 	v.polling = false
 	v.streaming = false
 	if v.cancel != nil {
 		v.cancel()
 		v.cancel = nil
+	}
+	if v.pollCancel != nil {
+		v.pollCancel()
+		v.pollCancel = nil
 	}
 }
 
@@ -261,6 +281,9 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case logEventMsg:
+		if v.closed {
+			return v, nil
+		}
 		v.addLogLine(msg.event)
 		v.updateViewport()
 		if v.streaming && v.eventCh != nil {
@@ -270,7 +293,7 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case logStreamEndMsg:
 		v.streaming = false
-		if v.logInfo != nil && !v.polling {
+		if v.logInfo != nil && !v.polling && !v.closed {
 			v.logLines = append(v.logLines, "--- LiveTail ended, switching to polling ---")
 			v.updateViewport()
 			return v, v.startPolling()
@@ -288,8 +311,8 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case logPollTickMsg:
-		if v.polling && v.logInfo != nil {
-			return v, tea.Batch(v.pollLogs(), v.pollTickCmd())
+		if v.polling && v.logInfo != nil && !v.closed && v.pollCtx != nil {
+			return v, tea.Batch(v.pollLogsWithCtx(v.pollCtx), v.pollTickCmd())
 		}
 		return v, nil
 

@@ -103,6 +103,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showHelp = !a.showHelp
 			return a, nil
 		case "esc":
+			// Dismiss error if visible
+			if a.err != nil {
+				a.err = nil
+				return a, nil
+			}
 			if a.showHelp {
 				a.showHelp = false
 				return a, nil
@@ -153,6 +158,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ErrorMsg:
 		a.err = msg.Err
+		// Give more time for access denied errors
+		if isAccessDenied(msg.Err) {
+			return a, clearErrorAfter(15 * time.Second)
+		}
 		return a, clearErrorAfter(5 * time.Second)
 
 	case ClearErrorMsg:
@@ -177,14 +186,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case AWSConfigChangedMsg:
-		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
-		defer cancel()
-		client, err := awsclient.NewClient(ctx, msg.Profile, msg.Region)
-		if err != nil {
-			a.err = err
-			return a, clearErrorAfter(5 * time.Second)
+		a.status = "Connecting to AWS..."
+		a.err = nil
+		profile := msg.Profile
+		region := msg.Region
+		return a, func() tea.Msg {
+			ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+			defer cancel()
+			client, err := awsclient.NewClient(ctx, profile, region)
+			if err != nil {
+				return awsClientErrorMsg{Err: err}
+			}
+			return awsClientReadyMsg{Client: client, Profile: profile, Region: region}
 		}
-		a.client = client
+
+	case awsClientReadyMsg:
+		a.client = msg.Client
 		// Best-effort session save; don't block on failure
 		_ = awsclient.SaveLastSession(msg.Profile, msg.Region, CurrentThemeName()) //nolint:errcheck
 		a.cluster = ""
@@ -198,6 +215,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		clusterView := NewClusterView(a.client)
 		a.stack = []View{clusterView}
 		return a, clusterView.Init()
+
+	case awsClientErrorMsg:
+		a.err = msg.Err
+		a.status = ""
+		return a, clearErrorAfter(10 * time.Second)
 
 	case ClusterSelectedMsg:
 		a.cluster = msg.ClusterName
@@ -263,7 +285,11 @@ func (a *App) renderHeader() string {
 
 	infoText := strings.Join(infoParts, "\n")
 	if a.err != nil {
-		infoText += "\n" + errorStyle.Render(fmt.Sprintf("ERR: %v", a.err))
+		errMsg := fmt.Sprintf("ERR: %v", a.err)
+		if isAccessDenied(a.err) {
+			errMsg += " (check IAM permissions: ecs:List*, ecs:Describe*, logs:*, cloudwatch:GetMetricData)"
+		}
+		infoText += "\n" + errorStyle.Render(errMsg)
 	} else if a.status != "" {
 		infoText += "\n" + statusStyle.Render(a.status)
 	}
@@ -312,9 +338,24 @@ func (a *App) renderFooter() string {
 	return RenderShortcutBar(shortcuts, a.width)
 }
 
+// layoutOverhead is the total vertical lines used by header, breadcrumb, footer, and separators.
+// logo header (4 lines) + breadcrumb(1) + footer(1) + newlines(2) = 8
+const layoutOverhead = 8
+
 func (a *App) contentHeight() int {
-	// logo header (4 lines) + breadcrumb(1) + footer(1) + newlines(2) = 8
-	return a.height - 8
+	return a.height - layoutOverhead
+}
+
+// isAccessDenied checks if the error is an AWS IAM permission error.
+func isAccessDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "AccessDeniedException") ||
+		strings.Contains(msg, "AccessDenied") ||
+		strings.Contains(msg, "UnauthorizedAccess") ||
+		strings.Contains(msg, "is not authorized to perform")
 }
 
 func clearErrorAfter(d time.Duration) tea.Cmd {

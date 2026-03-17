@@ -65,19 +65,25 @@ func (c *Client) ListClusters(ctx context.Context) ([]ClusterInfo, error) {
 		return nil, nil
 	}
 
-	desc, err := c.ECS.DescribeClusters(ctx, &ecs.DescribeClustersInput{
-		Clusters: clusterARNs,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("describing clusters: %w", err)
-	}
-
-	clusters := make([]ClusterInfo, 0, len(desc.Clusters))
-	for _, cl := range desc.Clusters {
-		clusters = append(clusters, ClusterInfo{
-			ARN:  aws.ToString(cl.ClusterArn),
-			Name: aws.ToString(cl.ClusterName),
+	// DescribeClusters max 100 at a time
+	var clusters []ClusterInfo
+	for i := 0; i < len(clusterARNs); i += 100 {
+		end := i + 100
+		if end > len(clusterARNs) {
+			end = len(clusterARNs)
+		}
+		desc, err := c.ECS.DescribeClusters(ctx, &ecs.DescribeClustersInput{
+			Clusters: clusterARNs[i:end],
 		})
+		if err != nil {
+			return nil, fmt.Errorf("describing clusters: %w", err)
+		}
+		for _, cl := range desc.Clusters {
+			clusters = append(clusters, ClusterInfo{
+				ARN:  aws.ToString(cl.ClusterArn),
+				Name: aws.ToString(cl.ClusterName),
+			})
+		}
 	}
 	return clusters, nil
 }
