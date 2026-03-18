@@ -20,18 +20,38 @@ type App struct {
 	client   *awsclient.Client
 	cluster  string
 	service  string
+	readOnly bool
 	width    int
 	height   int
 	err      error
 	status   string
 	showHelp bool
+	// Config
+	refreshInterval time.Duration // negative = disabled, 0 = default (10s)
+	shell           string        // shell for exec (default: /bin/sh)
 }
 
-func NewApp(client *awsclient.Client, cluster, service string) *App {
+func NewApp(client *awsclient.Client, cluster, service string, refreshInterval int, shell string, readOnly bool) *App {
+	var interval time.Duration
+	if refreshInterval < 0 {
+		interval = -1
+	} else if refreshInterval == 0 {
+		interval = 10 * time.Second
+	} else {
+		interval = time.Duration(refreshInterval) * time.Second
+	}
+
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
 	return &App{
-		client:  client,
-		cluster: cluster,
-		service: service,
+		client:          client,
+		cluster:         cluster,
+		service:         service,
+		readOnly:        readOnly,
+		refreshInterval: interval,
+		shell:           shell,
 	}
 }
 
@@ -49,12 +69,12 @@ func (a *App) Init() tea.Cmd {
 	}
 
 	if a.service != "" {
-		view := NewTaskView(a.client, a.cluster, a.service)
+		view := NewTaskView(a.client, a.cluster, a.service, a.readOnly, a.refreshInterval, a.shell)
 		a.stack = []View{view}
 		return view.Init()
 	}
 
-	view := NewServiceView(a.client, a.cluster)
+	view := NewServiceView(a.client, a.cluster, a.readOnly, a.refreshInterval, a.shell)
 	a.stack = []View{view}
 	return view.Init()
 }
@@ -216,6 +236,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.stack = []View{clusterView}
 		return a, clusterView.Init()
 
+
 	case awsClientErrorMsg:
 		a.err = msg.Err
 		a.status = ""
@@ -223,7 +244,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ClusterSelectedMsg:
 		a.cluster = msg.ClusterName
-		serviceView := NewServiceView(a.client, a.cluster)
+		serviceView := NewServiceView(a.client, a.cluster, a.readOnly, a.refreshInterval, a.shell)
 		return a, func() tea.Msg {
 			return PushViewMsg{View: serviceView}
 		}
@@ -281,6 +302,10 @@ func (a *App) renderHeader() string {
 	}
 	if a.cluster != "" {
 		infoParts = append(infoParts, fmt.Sprintf("Cluster: %s", a.cluster))
+	}
+
+	if a.readOnly {
+		infoParts = append(infoParts, lipgloss.NewStyle().Foreground(colorPeach).Bold(true).Render("[READ-ONLY]"))
 	}
 
 	infoText := strings.Join(infoParts, "\n")

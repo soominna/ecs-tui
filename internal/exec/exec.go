@@ -20,7 +20,7 @@ type ExecDoneMsg struct {
 
 // ExecContainer uses aws ecs execute-command to attach to a container.
 // It suspends the TUI, runs the subprocess, and resumes the TUI when done.
-func ExecContainer(profile, region, cluster, service, taskID, container string) tea.Cmd {
+func ExecContainer(profile, region, cluster, service, taskID, container, shell string) tea.Cmd {
 	if taskID == "" {
 		return func() tea.Msg {
 			return ExecDoneMsg{Err: fmt.Errorf("no task ID available")}
@@ -57,7 +57,7 @@ func ExecContainer(profile, region, cluster, service, taskID, container string) 
 		"--task", taskID,
 		"--container", container,
 		"--interactive",
-		"--command", "/bin/sh",
+		"--command", shell,
 	}
 	if profile != "" {
 		args = append(args, "--profile", profile)

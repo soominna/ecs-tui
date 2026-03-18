@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	awsclient "github.com/soominna/ecs-tui/internal/aws"
+	cfgpkg "github.com/soominna/ecs-tui/internal/config"
 	"github.com/soominna/ecs-tui/internal/ui"
 )
 
@@ -20,6 +21,8 @@ func main() {
 	region := flag.String("region", "", "AWS region")
 	cluster := flag.String("cluster", "", "ECS cluster name")
 	service := flag.String("service", "", "ECS service name (requires --cluster)")
+	readOnly := flag.Bool("read-only", false, "Read-only mode (disable all mutative actions)")
+	refreshInterval := flag.Int("refresh", 0, "Auto-refresh interval in seconds (-1 to disable)")
 	flag.Parse()
 
 	if *showVersion {
@@ -32,11 +35,36 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load config file
+	cfg := cfgpkg.Load()
+
+	// CLI flags override config values (only when explicitly set)
+	flagSet := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { flagSet[f.Name] = true })
+
+	if !flagSet["cluster"] && cfg.DefaultCluster != "" {
+		*cluster = cfg.DefaultCluster
+	}
+	if !flagSet["service"] && cfg.DefaultService != "" {
+		*service = cfg.DefaultService
+	}
+	if !flagSet["read-only"] && cfg.ReadOnly {
+		*readOnly = true
+	}
+	if !flagSet["refresh"] {
+		*refreshInterval = cfg.RefreshInterval
+	}
+
+	// Apply theme from config
+	if cfg.Theme != "" {
+		ui.ApplyTheme(cfg.Theme)
+	}
+
 	var client *awsclient.Client
 	var err error
 
 	// If no CLI flags, try restoring last session, then detect current config
-	if *profile == "" && *region == "" && *cluster == "" {
+	if *profile == "" && *region == "" && !flagSet["cluster"] && cfg.DefaultCluster == "" {
 		if last := awsclient.LoadLastSession(); last != nil {
 			*profile = last.Profile
 			*region = last.Region
@@ -61,7 +89,7 @@ func main() {
 		}
 	}
 
-	app := ui.NewApp(client, *cluster, *service)
+	app := ui.NewApp(client, *cluster, *service, *refreshInterval, cfg.Shell, *readOnly)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {

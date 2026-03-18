@@ -3,3 +3,5 @@ dist/
 PLAN.md
 .claude/
 .env
+.claudeignore
+.omc/

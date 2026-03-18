@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	awsclient "github.com/soominna/ecs-tui/internal/aws"
+	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
 	execpkg "github.com/soominna/ecs-tui/internal/exec"
 )
 
@@ -32,6 +33,13 @@ type TaskView struct {
 	confirmAction  string // "stop-task" | ""
 	confirmMsg     string
 	pendingTaskARN string
+	// Read-only mode
+	readOnly bool
+	// Config
+	refreshInterval time.Duration
+	shell           string
+	// Task status filter
+	taskStatusFilter ecstypes.DesiredStatus // RUNNING, STOPPED, or "" (ALL)
 }
 
 type tasksLoadedMsg struct {
@@ -44,16 +52,24 @@ type taskActionDoneMsg struct {
 
 type taskTickMsg time.Time
 
-func NewTaskView(client *awsclient.Client, cluster, service string) *TaskView {
+func NewTaskView(client *awsclient.Client, cluster, service string, readOnly bool, refreshInterval time.Duration, shell string) *TaskView {
 	ti := textinput.New()
 	ti.Placeholder = "Filter tasks..."
 	ti.CharLimit = 50
 
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
 	return &TaskView{
-		client:      client,
-		cluster:     cluster,
-		service:     service,
-		filterInput: ti,
+		client:           client,
+		cluster:          cluster,
+		service:          service,
+		filterInput:      ti,
+		readOnly:         readOnly,
+		refreshInterval:  refreshInterval,
+		shell:            shell,
+		taskStatusFilter: ecstypes.DesiredStatusRunning,
 	}
 }
 
@@ -72,15 +88,23 @@ func (v *TaskView) ShortcutHelp() []Shortcut {
 			{Key: "Esc", Desc: "Cancel"},
 		}
 	}
-	return []Shortcut{
+	shortcuts := []Shortcut{
 		{Key: "Enter/d", Desc: "Detail"},
 		{Key: "l", Desc: "Logs"},
-		{Key: "e", Desc: "Exec"},
-		{Key: "s", Desc: "Stop Task"},
-		{Key: "/", Desc: "Filter"},
-		{Key: "r", Desc: "Refresh"},
-		{Key: "Esc", Desc: "Back"},
 	}
+	if !v.readOnly {
+		shortcuts = append(shortcuts,
+			Shortcut{Key: "e", Desc: "Exec"},
+			Shortcut{Key: "s", Desc: "Stop Task"},
+		)
+	}
+	shortcuts = append(shortcuts,
+		Shortcut{Key: "t", Desc: "Status Filter"},
+		Shortcut{Key: "/", Desc: "Filter"},
+		Shortcut{Key: "r", Desc: "Refresh"},
+		Shortcut{Key: "Esc", Desc: "Back"},
+	)
+	return shortcuts
 }
 
 func (v *TaskView) Init() tea.Cmd {
@@ -88,7 +112,14 @@ func (v *TaskView) Init() tea.Cmd {
 }
 
 func (v *TaskView) tickCmd() tea.Cmd {
-	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+	if v.refreshInterval < 0 {
+		return nil
+	}
+	interval := v.refreshInterval
+	if interval == 0 {
+		interval = 10 * time.Second
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return taskTickMsg(t)
 	})
 }
@@ -97,10 +128,18 @@ func (v *TaskView) fetchTasks() tea.Cmd {
 	client := v.client
 	cluster := v.cluster
 	service := v.service
+	statusFilter := v.taskStatusFilter
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
-		tasks, err := client.ListTasks(ctx, cluster, service)
+		var tasks []awsclient.TaskInfo
+		var err error
+		if statusFilter == "" {
+			// ALL mode: fetch both RUNNING and STOPPED
+			tasks, err = client.ListTasksAll(ctx, cluster, service)
+		} else {
+			tasks, err = client.ListTasks(ctx, cluster, service, statusFilter)
+		}
 		if err != nil {
 			return ErrorMsg{Err: err}
 		}
@@ -123,6 +162,18 @@ func (v *TaskView) selectedTask() *awsclient.TaskInfo {
 		}
 	}
 	return nil
+}
+
+// statusFilterLabel returns the display label for the current status filter.
+func (v *TaskView) statusFilterLabel() string {
+	switch v.taskStatusFilter {
+	case ecstypes.DesiredStatusStopped:
+		return "STOPPED"
+	case "":
+		return "ALL"
+	default:
+		return "RUNNING"
+	}
 }
 
 func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -238,6 +289,11 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return PushViewMsg{View: logView}
 			}
 		case "e":
+			if v.readOnly {
+				return v, func() tea.Msg {
+					return ErrorMsg{Err: fmt.Errorf("action blocked: read-only mode")}
+				}
+			}
 			task := v.selectedTask()
 			if task == nil {
 				return v, nil
@@ -254,8 +310,14 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.service,
 				task.TaskID,
 				task.ContainerName,
+				v.shell,
 			)
 		case "s":
+			if v.readOnly {
+				return v, func() tea.Msg {
+					return ErrorMsg{Err: fmt.Errorf("action blocked: read-only mode")}
+				}
+			}
 			task := v.selectedTask()
 			if task != nil {
 				v.pendingTaskARN = task.TaskARN
@@ -263,6 +325,18 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				v.confirmMsg = fmt.Sprintf("Stop task '%s'? (y/n)", task.TaskID)
 			}
 			return v, nil
+		case "t":
+			// Cycle status filter: RUNNING -> STOPPED -> ALL -> RUNNING
+			switch v.taskStatusFilter {
+			case ecstypes.DesiredStatusRunning:
+				v.taskStatusFilter = ecstypes.DesiredStatusStopped
+			case ecstypes.DesiredStatusStopped:
+				v.taskStatusFilter = "" // ALL
+			default:
+				v.taskStatusFilter = ecstypes.DesiredStatusRunning
+			}
+			v.loaded = false
+			return v, v.fetchTasks()
 		case "/":
 			v.filtering = true
 			v.filterInput.Focus()
@@ -296,11 +370,14 @@ func (v *TaskView) View() string {
 
 	var sb strings.Builder
 
-	// Last updated indicator
+	// Last updated indicator + status filter
 	if !v.lastUpdated.IsZero() {
 		ago := time.Since(v.lastUpdated).Truncate(time.Second)
 		sb.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render(
 			fmt.Sprintf("  Updated %s ago", ago)))
+		sb.WriteString("  ")
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorSubtext0).Render(
+			fmt.Sprintf("Status: %s", v.statusFilterLabel())))
 		sb.WriteString("\n")
 	}
 

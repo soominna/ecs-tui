@@ -142,12 +142,16 @@ func (c *Client) ListServices(ctx context.Context, cluster string) ([]ServiceInf
 	return services, nil
 }
 
-func (c *Client) ListTasks(ctx context.Context, cluster, service string) ([]TaskInfo, error) {
-	var taskARNs []string
-	paginator := ecs.NewListTasksPaginator(c.ECS, &ecs.ListTasksInput{
+func (c *Client) ListTasks(ctx context.Context, cluster, service string, desiredStatus ecstypes.DesiredStatus) ([]TaskInfo, error) {
+	input := &ecs.ListTasksInput{
 		Cluster:     aws.String(cluster),
 		ServiceName: aws.String(service),
-	})
+	}
+	if desiredStatus != "" {
+		input.DesiredStatus = desiredStatus
+	}
+	var taskARNs []string
+	paginator := ecs.NewListTasksPaginator(c.ECS, input)
 	for paginator.HasMorePages() {
 		out, err := paginator.NextPage(ctx)
 		if err != nil {
@@ -213,6 +217,19 @@ func (c *Client) ListTasks(ctx context.Context, cluster, service string) ([]Task
 		}
 	}
 	return tasks, nil
+}
+
+// ListTasksAll fetches both RUNNING and STOPPED tasks and merges the results.
+func (c *Client) ListTasksAll(ctx context.Context, cluster, service string) ([]TaskInfo, error) {
+	running, err := c.ListTasks(ctx, cluster, service, ecstypes.DesiredStatusRunning)
+	if err != nil {
+		return nil, err
+	}
+	stopped, err := c.ListTasks(ctx, cluster, service, ecstypes.DesiredStatusStopped)
+	if err != nil {
+		return nil, err
+	}
+	return append(running, stopped...), nil
 }
 
 // describeTaskDef is a shared helper that calls DescribeTaskDefinition and

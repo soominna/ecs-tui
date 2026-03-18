@@ -38,6 +38,11 @@ type ServiceView struct {
 	// Count input state
 	inputtingCount bool
 	countInput     textinput.Model
+	// Read-only mode
+	readOnly bool
+	// Config
+	refreshInterval time.Duration
+	shell           string
 }
 
 type servicesLoadedMsg struct {
@@ -59,7 +64,7 @@ type serviceActionDoneMsg struct {
 
 type serviceTickMsg time.Time
 
-func NewServiceView(client *awsclient.Client, cluster string) *ServiceView {
+func NewServiceView(client *awsclient.Client, cluster string, readOnly bool, refreshInterval time.Duration, shell string) *ServiceView {
 	ti := textinput.New()
 	ti.Placeholder = "Filter services..."
 	ti.CharLimit = 50
@@ -69,12 +74,15 @@ func NewServiceView(client *awsclient.Client, cluster string) *ServiceView {
 	ci.CharLimit = 5
 
 	return &ServiceView{
-		client:      client,
-		cluster:     cluster,
-		taskDefs:    make(map[string]*awsclient.TaskDefinitionInfo),
-		metrics:     make(map[string]*awsclient.ServiceMetrics),
-		filterInput: ti,
-		countInput:  ci,
+		client:          client,
+		cluster:         cluster,
+		taskDefs:        make(map[string]*awsclient.TaskDefinitionInfo),
+		metrics:         make(map[string]*awsclient.ServiceMetrics),
+		filterInput:     ti,
+		countInput:      ci,
+		readOnly:        readOnly,
+		refreshInterval: refreshInterval,
+		shell:           shell,
 	}
 }
 
@@ -99,15 +107,22 @@ func (v *ServiceView) ShortcutHelp() []Shortcut {
 			{Key: "Esc", Desc: "Cancel"},
 		}
 	}
-	return []Shortcut{
+	shortcuts := []Shortcut{
 		{Key: "Enter", Desc: "Tasks"},
 		{Key: "e", Desc: "Events"},
-		{Key: "f", Desc: "Force Deploy"},
-		{Key: "d", Desc: "Desired Count"},
-		{Key: "/", Desc: "Filter"},
-		{Key: "r", Desc: "Refresh"},
-		{Key: "Esc", Desc: "Back"},
 	}
+	if !v.readOnly {
+		shortcuts = append(shortcuts,
+			Shortcut{Key: "f", Desc: "Force Deploy"},
+			Shortcut{Key: "d", Desc: "Desired Count"},
+		)
+	}
+	shortcuts = append(shortcuts,
+		Shortcut{Key: "/", Desc: "Filter"},
+		Shortcut{Key: "r", Desc: "Refresh"},
+		Shortcut{Key: "Esc", Desc: "Back"},
+	)
+	return shortcuts
 }
 
 func (v *ServiceView) Init() tea.Cmd {
@@ -115,7 +130,14 @@ func (v *ServiceView) Init() tea.Cmd {
 }
 
 func (v *ServiceView) tickCmd() tea.Cmd {
-	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
+	if v.refreshInterval < 0 {
+		return nil
+	}
+	interval := v.refreshInterval
+	if interval == 0 {
+		interval = 10 * time.Second
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
 		return serviceTickMsg(t)
 	})
 }
@@ -370,7 +392,7 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			svc := v.selectedService()
 			if svc != nil {
-				taskView := NewTaskView(v.client, v.cluster, svc.Name)
+				taskView := NewTaskView(v.client, v.cluster, svc.Name, v.readOnly, v.refreshInterval, v.shell)
 				return v, func() tea.Msg {
 					return PushViewMsg{View: taskView}
 				}
@@ -384,6 +406,11 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "f":
+			if v.readOnly {
+				return v, func() tea.Msg {
+					return ErrorMsg{Err: fmt.Errorf("action blocked: read-only mode")}
+				}
+			}
 			svc := v.selectedService()
 			if svc != nil {
 				v.pendingService = svc.Name
@@ -392,6 +419,11 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return v, nil
 		case "d":
+			if v.readOnly {
+				return v, func() tea.Msg {
+					return ErrorMsg{Err: fmt.Errorf("action blocked: read-only mode")}
+				}
+			}
 			svc := v.selectedService()
 			if svc != nil {
 				v.pendingService = svc.Name
