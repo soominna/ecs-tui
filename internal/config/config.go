@@ -13,8 +13,9 @@ type Config struct {
 	DefaultService  string `yaml:"default_service"`
 	RefreshInterval int    `yaml:"refresh_interval"` // seconds, -1 disables auto-refresh
 	ReadOnly        bool   `yaml:"read_only"`
-	Theme           string `yaml:"theme"`  // "mocha" or "latte"
-	Shell           string `yaml:"shell"`  // shell for exec (default: /bin/sh)
+	Theme           string `yaml:"theme"`    // "mocha" or "latte"
+	Shell           string `yaml:"shell"`    // shell for exec (default: /bin/sh)
+	Metrics         bool   `yaml:"metrics"`  // enable CloudWatch metrics (default: false)
 }
 
 // DefaultConfig returns the default configuration values.

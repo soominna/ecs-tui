@@ -9,7 +9,7 @@ import (
 
 func TestNewApp(t *testing.T) {
 	t.Run("default mode", func(t *testing.T) {
-		app := NewApp(nil, "", "", 0, "", false)
+		app := NewApp(nil, "", "", 0, "", false, false, "", "")
 		if app.readOnly {
 			t.Error("expected readOnly=false")
 		}
@@ -22,28 +22,28 @@ func TestNewApp(t *testing.T) {
 	})
 
 	t.Run("read-only mode", func(t *testing.T) {
-		app := NewApp(nil, "my-cluster", "", 0, "", true)
+		app := NewApp(nil, "my-cluster", "", 0, "", true, false, "", "")
 		if !app.readOnly {
 			t.Error("expected readOnly=true")
 		}
 	})
 
 	t.Run("custom refresh interval", func(t *testing.T) {
-		app := NewApp(nil, "", "", 30, "", false)
+		app := NewApp(nil, "", "", 30, "", false, false, "", "")
 		if app.refreshInterval != 30*time.Second {
 			t.Errorf("expected 30s interval, got %v", app.refreshInterval)
 		}
 	})
 
 	t.Run("disabled refresh", func(t *testing.T) {
-		app := NewApp(nil, "", "", -1, "", false)
+		app := NewApp(nil, "", "", -1, "", false, false, "", "")
 		if app.refreshInterval != -1 {
 			t.Errorf("expected -1 (disabled), got %v", app.refreshInterval)
 		}
 	})
 
 	t.Run("custom shell", func(t *testing.T) {
-		app := NewApp(nil, "", "", 0, "/bin/bash", false)
+		app := NewApp(nil, "", "", 0, "/bin/bash", false, false, "", "")
 		if app.shell != "/bin/bash" {
 			t.Errorf("shell = %q, want /bin/bash", app.shell)
 		}
@@ -51,7 +51,7 @@ func TestNewApp(t *testing.T) {
 }
 
 func TestApp_HelpToggle(t *testing.T) {
-	app := NewApp(nil, "", "", 0, "", false)
+	app := NewApp(nil, "", "", 0, "", false, false, "", "")
 	app.width = 100
 	app.height = 40
 	app.Init()
@@ -72,7 +72,7 @@ func TestApp_HelpToggle(t *testing.T) {
 }
 
 func TestApp_ReadOnlyHeader(t *testing.T) {
-	app := NewApp(nil, "", "", 0, "", true)
+	app := NewApp(nil, "", "", 0, "", true, false, "", "")
 	app.width = 120
 	app.height = 40
 	app.Init()
@@ -84,7 +84,7 @@ func TestApp_ReadOnlyHeader(t *testing.T) {
 }
 
 func TestApp_NormalHeader(t *testing.T) {
-	app := NewApp(nil, "", "", 0, "", false)
+	app := NewApp(nil, "", "", 0, "", false, false, "", "")
 	app.width = 120
 	app.height = 40
 	app.Init()

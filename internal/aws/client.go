@@ -62,27 +62,7 @@ func ListProfiles() ([]string, error) {
 	var profiles []string
 	for _, fname := range []string{"config", "credentials"} {
 		p := filepath.Join(home, ".aws", fname)
-		// Check that the file is a regular file (not a symlink)
-		info, err := os.Lstat(p)
-		if err != nil || !info.Mode().IsRegular() {
-			continue
-		}
-		f, err := os.Open(p)
-		if err != nil {
-			continue
-		}
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-				section := strings.Trim(line, "[]")
-				section = strings.TrimPrefix(section, "profile ")
-				if section != "" {
-					profiles = append(profiles, section)
-				}
-			}
-		}
-		f.Close() // safe: no early returns in this block; scanner errors are non-fatal
+		profiles = append(profiles, parseProfilesFromFile(p)...)
 	}
 
 	seen := make(map[string]bool)
@@ -159,6 +139,34 @@ func readRegionFromConfig(profile string) string {
 		}
 	}
 	return ""
+}
+
+// parseProfilesFromFile extracts AWS profile names from a config/credentials file.
+// Uses a dedicated function so defer f.Close() runs promptly per file.
+func parseProfilesFromFile(path string) []string {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	var profiles []string
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			section := strings.Trim(line, "[]")
+			section = strings.TrimPrefix(section, "profile ")
+			if section != "" {
+				profiles = append(profiles, section)
+			}
+		}
+	}
+	return profiles
 }
 
 func CommonRegions() []string {

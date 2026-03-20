@@ -11,7 +11,7 @@ import (
 // --- ServiceView Read-Only Tests ---
 
 func newTestServiceView(readOnly bool) *ServiceView {
-	return NewServiceView(nil, "cluster", readOnly, 10*time.Second, "/bin/sh")
+	return NewServiceView(nil, "cluster", "", "", readOnly, 10*time.Second, "/bin/sh", false, nil)
 }
 
 func TestServiceView_ReadOnly_BlocksForceDeploy(t *testing.T) {
@@ -117,7 +117,7 @@ func TestServiceView_Normal_ShortcutHelp(t *testing.T) {
 // --- TaskView Read-Only Tests ---
 
 func newTestTaskView(readOnly bool) *TaskView {
-	return NewTaskView(nil, "cluster", "service", readOnly, 10*time.Second, "/bin/sh")
+	return NewTaskView(nil, "cluster", "service", "", "", readOnly, 10*time.Second, "/bin/sh")
 }
 
 func TestTaskView_ReadOnly_BlocksStopTask(t *testing.T) {
@@ -259,7 +259,7 @@ func TestTaskView_StatusFilterToggle(t *testing.T) {
 // --- Refresh Interval Tests ---
 
 func TestServiceView_RefreshDisabled(t *testing.T) {
-	sv := NewServiceView(nil, "cluster", false, -1, "/bin/sh")
+	sv := NewServiceView(nil, "cluster", "", "", false, -1, "/bin/sh", false, nil)
 	cmd := sv.tickCmd()
 	if cmd != nil {
 		t.Error("tickCmd should return nil when refresh is disabled")
@@ -267,7 +267,7 @@ func TestServiceView_RefreshDisabled(t *testing.T) {
 }
 
 func TestServiceView_RefreshCustomInterval(t *testing.T) {
-	sv := NewServiceView(nil, "cluster", false, 30*time.Second, "/bin/sh")
+	sv := NewServiceView(nil, "cluster", "", "", false, 30*time.Second, "/bin/sh", false, nil)
 	cmd := sv.tickCmd()
 	if cmd == nil {
 		t.Error("tickCmd should return a command for 30s interval")
@@ -275,7 +275,7 @@ func TestServiceView_RefreshCustomInterval(t *testing.T) {
 }
 
 func TestTaskView_RefreshDisabled(t *testing.T) {
-	tv := NewTaskView(nil, "cluster", "service", false, -1, "/bin/sh")
+	tv := NewTaskView(nil, "cluster", "service", "", "", false, -1, "/bin/sh")
 	cmd := tv.tickCmd()
 	if cmd != nil {
 		t.Error("tickCmd should return nil when refresh is disabled")
@@ -283,7 +283,7 @@ func TestTaskView_RefreshDisabled(t *testing.T) {
 }
 
 func TestTaskView_RefreshCustomInterval(t *testing.T) {
-	tv := NewTaskView(nil, "cluster", "service", false, 30*time.Second, "/bin/sh")
+	tv := NewTaskView(nil, "cluster", "service", "", "", false, 30*time.Second, "/bin/sh")
 	cmd := tv.tickCmd()
 	if cmd == nil {
 		t.Error("tickCmd should return a command for 30s interval")

@@ -6,8 +6,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	awsclient "github.com/soominna/ecs-tui/internal/aws"
 )
@@ -15,7 +17,7 @@ import (
 const maxLogLines = 10000
 
 type LogView struct {
-	client     *awsclient.Client
+	client     awsclient.ECSAPI
 	cluster    string
 	task       *awsclient.TaskInfo
 	viewport   viewport.Model
@@ -37,6 +39,13 @@ type LogView struct {
 	polling    bool
 	pollCtx    context.Context
 	pollCancel context.CancelFunc
+
+	// Search
+	searchInput   textinput.Model
+	searching     bool
+	searchText    string
+	searchMatches []int // indices into logLines
+	searchCurrent int   // current match position
 }
 
 type logInfoMsg struct {
@@ -65,12 +74,17 @@ type logEventsMsg struct {
 	nextToken string
 }
 
-func NewLogView(client *awsclient.Client, cluster string, task *awsclient.TaskInfo) *LogView {
+func NewLogView(client awsclient.ECSAPI, cluster string, task *awsclient.TaskInfo) *LogView {
+	si := textinput.New()
+	si.Placeholder = "Search logs..."
+	si.CharLimit = 100
+
 	return &LogView{
-		client:     client,
-		cluster:    cluster,
-		task:       task,
-		autoScroll: true,
+		client:      client,
+		cluster:     cluster,
+		task:        task,
+		autoScroll:  true,
+		searchInput: si,
 	}
 }
 
@@ -83,16 +97,29 @@ func (v *LogView) Title() string {
 }
 
 func (v *LogView) ShortcutHelp() []Shortcut {
+	if v.searching {
+		return []Shortcut{
+			{Key: "Enter", Desc: "Search"},
+			{Key: "Esc", Desc: "Cancel"},
+		}
+	}
 	followDesc := "Follow (off)"
 	if v.autoScroll {
 		followDesc = "Follow (on)"
 	}
-	return []Shortcut{
+	shortcuts := []Shortcut{
 		{Key: "f", Desc: followDesc},
-		{Key: "G", Desc: "Bottom"},
-		{Key: "g", Desc: "Top"},
-		{Key: "Esc", Desc: "Back"},
+		{Key: "/", Desc: "Search"},
 	}
+	if v.searchText != "" {
+		shortcuts = append(shortcuts, Shortcut{Key: "n/N", Desc: "Next/Prev"})
+	}
+	shortcuts = append(shortcuts,
+		Shortcut{Key: "G", Desc: "Bottom"},
+		Shortcut{Key: "g", Desc: "Top"},
+		Shortcut{Key: "Esc", Desc: "Back"},
+	)
+	return shortcuts
 }
 
 func (v *LogView) Init() tea.Cmd {
@@ -183,22 +210,81 @@ func (v *LogView) pollLogsWithCtx(parentCtx context.Context) tea.Cmd {
 	}
 }
 
+func (v *LogView) formatLogLine(event awsclient.LogEvent) string {
+	ts := event.Timestamp.Local().Format("15:04:05")
+	msg := strings.TrimRight(event.Message, "\n")
+	upper := strings.ToUpper(msg)
+	var style lipgloss.Style
+	switch {
+	case strings.Contains(upper, "ERROR"), strings.Contains(upper, "FATAL"):
+		style = lipgloss.NewStyle().Foreground(colorRed)
+	case strings.Contains(upper, "WARN"):
+		style = lipgloss.NewStyle().Foreground(colorYellow)
+	case strings.Contains(upper, "DEBUG"), strings.Contains(upper, "TRACE"):
+		style = lipgloss.NewStyle().Foreground(colorOverlay1)
+	default:
+		style = lipgloss.NewStyle().Foreground(colorText)
+	}
+	return fmt.Sprintf("%s %s",
+		lipgloss.NewStyle().Foreground(colorBlue).Render(ts),
+		style.Render(msg))
+}
+
 func (v *LogView) addLogLine(event awsclient.LogEvent) {
-	line := fmt.Sprintf("%s %s",
-		event.Timestamp.Local().Format("15:04:05"),
-		strings.TrimRight(event.Message, "\n"),
-	)
-	v.logLines = append(v.logLines, line)
+	v.logLines = append(v.logLines, v.formatLogLine(event))
 	if len(v.logLines) > maxLogLines {
 		v.logLines = v.logLines[len(v.logLines)-maxLogLines:]
 	}
+}
+
+func (v *LogView) computeSearchMatches() {
+	v.searchMatches = nil
+	if v.searchText == "" {
+		return
+	}
+	lower := strings.ToLower(v.searchText)
+	for i, line := range v.logLines {
+		if strings.Contains(strings.ToLower(line), lower) {
+			v.searchMatches = append(v.searchMatches, i)
+		}
+	}
+	if len(v.searchMatches) > 0 {
+		v.searchCurrent = len(v.searchMatches) - 1 // start at last match
+	}
+}
+
+func (v *LogView) gotoCurrentMatch() {
+	if len(v.searchMatches) == 0 || !v.ready {
+		return
+	}
+	lineIdx := v.searchMatches[v.searchCurrent]
+	// Approximate: set viewport to show the matching line
+	v.autoScroll = false
+	v.viewport.SetYOffset(lineIdx)
 }
 
 func (v *LogView) updateViewport() {
 	if !v.ready {
 		return
 	}
-	content := strings.Join(v.logLines, "\n")
+	lines := make([]string, len(v.logLines))
+	copy(lines, v.logLines)
+
+	// Highlight search matches
+	if v.searchText != "" {
+		matchSet := make(map[int]bool)
+		for _, idx := range v.searchMatches {
+			matchSet[idx] = true
+		}
+		highlightStyle := lipgloss.NewStyle().Background(colorSurface2)
+		for i, line := range lines {
+			if matchSet[i] {
+				lines[i] = highlightStyle.Render(line)
+			}
+		}
+	}
+
+	content := strings.Join(lines, "\n")
 	v.viewport.SetContent(content)
 	if v.autoScroll {
 		v.viewport.GotoBottom()
@@ -317,10 +403,54 @@ func (v *LogView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return v, nil
 
 	case tea.KeyMsg:
+		// Search input mode
+		if v.searching {
+			switch msg.String() {
+			case "enter":
+				v.searching = false
+				v.searchText = v.searchInput.Value()
+				v.searchInput.Blur()
+				v.computeSearchMatches()
+				v.updateViewport()
+				v.gotoCurrentMatch()
+				return v, nil
+			case "esc":
+				v.searching = false
+				v.searchInput.Blur()
+				return v, nil
+			}
+			var cmd tea.Cmd
+			v.searchInput, cmd = v.searchInput.Update(msg)
+			return v, cmd
+		}
+
 		switch msg.String() {
 		case "esc":
+			if v.searchText != "" {
+				v.searchText = ""
+				v.searchInput.SetValue("")
+				v.searchMatches = nil
+				v.updateViewport()
+				return v, nil
+			}
 			v.Close()
 			return v, func() tea.Msg { return PopViewMsg{} }
+		case "/":
+			v.searching = true
+			v.searchInput.Focus()
+			return v, textinput.Blink
+		case "n":
+			if len(v.searchMatches) > 0 {
+				v.searchCurrent = (v.searchCurrent + 1) % len(v.searchMatches)
+				v.gotoCurrentMatch()
+			}
+			return v, nil
+		case "N":
+			if len(v.searchMatches) > 0 {
+				v.searchCurrent = (v.searchCurrent - 1 + len(v.searchMatches)) % len(v.searchMatches)
+				v.gotoCurrentMatch()
+			}
+			return v, nil
 		case "f":
 			v.autoScroll = !v.autoScroll
 			if v.autoScroll {
@@ -358,5 +488,20 @@ func (v *LogView) View() string {
 	if !v.ready {
 		return loadingStyle.Render("  Loading logs...")
 	}
-	return v.viewport.View()
+	var sb strings.Builder
+	if v.searching {
+		sb.WriteString("  Search: ")
+		sb.WriteString(v.searchInput.View())
+		sb.WriteString("\n")
+	} else if v.searchText != "" {
+		info := fmt.Sprintf("  Search: %s (%d/%d matches, press Esc to clear)",
+			v.searchText, v.searchCurrent+1, len(v.searchMatches))
+		if len(v.searchMatches) == 0 {
+			info = fmt.Sprintf("  Search: %s (no matches, press Esc to clear)", v.searchText)
+		}
+		sb.WriteString(lipgloss.NewStyle().Foreground(colorMuted).Render(info))
+		sb.WriteString("\n")
+	}
+	sb.WriteString(v.viewport.View())
+	return sb.String()
 }

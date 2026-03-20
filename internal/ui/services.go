@@ -17,12 +17,16 @@ import (
 )
 
 type ServiceView struct {
-	client      *awsclient.Client
+	client      awsclient.ECSAPI
 	cluster     string
+	profile     string
+	region      string
 	table       table.Model
 	services    []awsclient.ServiceInfo
 	taskDefs    map[string]*awsclient.TaskDefinitionInfo
 	metrics     map[string]*awsclient.ServiceMetrics
+	deployments map[string]*awsclient.ServiceDeploymentInfo
+	metricsHist map[string]*awsclient.ServiceMetricsHistory
 	width       int
 	height      int
 	loaded      bool
@@ -31,7 +35,7 @@ type ServiceView struct {
 	filtering   bool
 	filterText  string
 	// Confirm action state
-	confirmAction  string // "force-deploy" | "update-count" | ""
+	confirmAction  string // "force-deploy" | "update-count" | "enable-metrics" | ""
 	confirmMsg     string
 	pendingService string
 	pendingCount   int32
@@ -43,6 +47,7 @@ type ServiceView struct {
 	// Config
 	refreshInterval time.Duration
 	shell           string
+	metricsEnabled  bool
 }
 
 type servicesLoadedMsg struct {
@@ -55,7 +60,16 @@ type taskDefsLoadedMsg struct {
 }
 
 type serviceMetricsLoadedMsg struct {
-	metrics map[string]*awsclient.ServiceMetrics
+	metrics  map[string]*awsclient.ServiceMetrics
+	fetchErr error // non-nil if API call failed (metrics set to empty so display shows "-")
+}
+
+type serviceDeploymentsLoadedMsg struct {
+	deployments map[string]*awsclient.ServiceDeploymentInfo
+}
+
+type serviceMetricsHistoryLoadedMsg struct {
+	history map[string]*awsclient.ServiceMetricsHistory
 }
 
 type serviceActionDoneMsg struct {
@@ -64,7 +78,7 @@ type serviceActionDoneMsg struct {
 
 type serviceTickMsg time.Time
 
-func NewServiceView(client *awsclient.Client, cluster string, readOnly bool, refreshInterval time.Duration, shell string) *ServiceView {
+func NewServiceView(client awsclient.ECSAPI, cluster, profile, region string, readOnly bool, refreshInterval time.Duration, shell string, metricsEnabled bool, taskDefCache map[string]*awsclient.TaskDefinitionInfo) *ServiceView {
 	ti := textinput.New()
 	ti.Placeholder = "Filter services..."
 	ti.CharLimit = 50
@@ -73,16 +87,27 @@ func NewServiceView(client *awsclient.Client, cluster string, readOnly bool, ref
 	ci.Placeholder = "Enter desired count..."
 	ci.CharLimit = 5
 
+	// Initialize taskDefs from app-level cache
+	defs := make(map[string]*awsclient.TaskDefinitionInfo)
+	for k, v := range taskDefCache {
+		defs[k] = v
+	}
+
 	return &ServiceView{
 		client:          client,
 		cluster:         cluster,
-		taskDefs:        make(map[string]*awsclient.TaskDefinitionInfo),
+		profile:         profile,
+		region:          region,
+		taskDefs:        defs,
 		metrics:         make(map[string]*awsclient.ServiceMetrics),
+		deployments:     make(map[string]*awsclient.ServiceDeploymentInfo),
+		metricsHist:     make(map[string]*awsclient.ServiceMetricsHistory),
 		filterInput:     ti,
 		countInput:      ci,
 		readOnly:        readOnly,
 		refreshInterval: refreshInterval,
 		shell:           shell,
+		metricsEnabled:  metricsEnabled,
 	}
 }
 
@@ -110,12 +135,18 @@ func (v *ServiceView) ShortcutHelp() []Shortcut {
 	shortcuts := []Shortcut{
 		{Key: "Enter", Desc: "Tasks"},
 		{Key: "e", Desc: "Events"},
+		{Key: "D", Desc: "Deploys"},
 	}
 	if !v.readOnly {
 		shortcuts = append(shortcuts,
 			Shortcut{Key: "f", Desc: "Force Deploy"},
 			Shortcut{Key: "d", Desc: "Desired Count"},
 		)
+	}
+	if v.metricsEnabled {
+		shortcuts = append(shortcuts, Shortcut{Key: "m", Desc: "Metrics Off"})
+	} else {
+		shortcuts = append(shortcuts, Shortcut{Key: "m", Desc: "Metrics On"})
 	}
 	shortcuts = append(shortcuts,
 		Shortcut{Key: "/", Desc: "Filter"},
@@ -161,15 +192,20 @@ func (v *ServiceView) fetchTaskDefs() tea.Cmd {
 	services := make([]awsclient.ServiceInfo, len(v.services))
 	copy(services, v.services)
 	client := v.client
+	// Copy existing cache keys to skip already-fetched defs
+	cached := make(map[string]bool)
+	for k := range v.taskDefs {
+		cached[k] = true
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 
-		// Collect unique task definitions to fetch
+		// Collect unique task definitions to fetch (skip cached)
 		var unique []string
 		seen := make(map[string]bool)
 		for _, svc := range services {
-			if svc.TaskDef == "" || seen[svc.TaskDef] {
+			if svc.TaskDef == "" || seen[svc.TaskDef] || cached[svc.TaskDef] {
 				continue
 			}
 			seen[svc.TaskDef] = true
@@ -217,9 +253,67 @@ func (v *ServiceView) fetchMetrics() tea.Cmd {
 		defer cancel()
 		metrics, err := client.GetServiceMetrics(ctx, cluster, names)
 		if err != nil {
-			return ErrorMsg{Err: err}
+			// Return empty metrics so display shows "-" instead of staying at "..."
+			empty := make(map[string]*awsclient.ServiceMetrics)
+			for _, n := range names {
+				empty[n] = &awsclient.ServiceMetrics{}
+			}
+			return serviceMetricsLoadedMsg{metrics: empty, fetchErr: err}
 		}
 		return serviceMetricsLoadedMsg{metrics: metrics}
+	}
+}
+
+func (v *ServiceView) fetchDeployments() tea.Cmd {
+	names := make([]string, 0, len(v.services))
+	for _, svc := range v.services {
+		names = append(names, svc.Name)
+	}
+	client := v.client
+	cluster := v.cluster
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+		defer cancel()
+		result := make(map[string]*awsclient.ServiceDeploymentInfo)
+		sem := make(chan struct{}, 5)
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		for _, name := range names {
+			wg.Add(1)
+			go func(n string) {
+				defer wg.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				info, err := client.GetServiceDeployments(ctx, cluster, n)
+				if err != nil {
+					return // non-fatal
+				}
+				mu.Lock()
+				result[n] = info
+				mu.Unlock()
+			}(name)
+		}
+		wg.Wait()
+		return serviceDeploymentsLoadedMsg{deployments: result}
+	}
+}
+
+func (v *ServiceView) fetchMetricsHistory() tea.Cmd {
+	names := make([]string, 0, len(v.services))
+	for _, svc := range v.services {
+		names = append(names, svc.Name)
+	}
+	client := v.client
+	cluster := v.cluster
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
+		defer cancel()
+		history, err := client.GetServiceMetricsHistory(ctx, cluster, names, 8)
+		if err != nil {
+			// Silently return empty history — sparklines just won't show
+			return serviceMetricsHistoryLoadedMsg{history: make(map[string]*awsclient.ServiceMetricsHistory)}
+		}
+		return serviceMetricsHistoryLoadedMsg{history: history}
 	}
 }
 
@@ -255,20 +349,49 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		v.loaded = true
 		v.lastUpdated = time.Now()
 		v.rebuildTable()
-		return v, tea.Batch(v.fetchTaskDefs(), v.fetchMetrics())
+		cmds := []tea.Cmd{v.fetchTaskDefs(), v.fetchDeployments()}
+		if v.metricsEnabled {
+			cmds = append(cmds, v.fetchMetrics(), v.fetchMetricsHistory())
+		}
+		return v, tea.Batch(cmds...)
 
 	case taskDefsLoadedMsg:
-		v.taskDefs = msg.defs
+		for k, def := range msg.defs {
+			v.taskDefs[k] = def
+		}
 		v.rebuildTable()
+		var cmds []tea.Cmd
+		if len(msg.defs) > 0 {
+			// Update app-level cache
+			cmds = append(cmds, func() tea.Msg {
+				return taskDefCacheUpdateMsg{Defs: msg.defs}
+			})
+		}
 		if len(msg.errors) > 0 {
-			return v, func() tea.Msg {
+			cmds = append(cmds, func() tea.Msg {
 				return ErrorMsg{Err: fmt.Errorf("failed to fetch %d task definition(s)", len(msg.errors))}
-			}
+			})
+		}
+		if len(cmds) > 0 {
+			return v, tea.Batch(cmds...)
 		}
 		return v, nil
 
 	case serviceMetricsLoadedMsg:
 		v.metrics = msg.metrics
+		v.rebuildTable()
+		if msg.fetchErr != nil {
+			return v, func() tea.Msg { return ErrorMsg{Err: msg.fetchErr} }
+		}
+		return v, nil
+
+	case serviceDeploymentsLoadedMsg:
+		v.deployments = msg.deployments
+		v.rebuildTable()
+		return v, nil
+
+	case serviceMetricsHistoryLoadedMsg:
+		v.metricsHist = msg.history
 		v.rebuildTable()
 		return v, nil
 
@@ -325,6 +448,14 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						return serviceActionDoneMsg{message: fmt.Sprintf("Desired count updated to %d: %s", count, svcName)}
 					}
+				case "enable-metrics":
+					v.metricsEnabled = true
+					v.rebuildTable() // Show metric columns immediately with "..." while loading
+					return v, tea.Batch(
+						v.fetchMetrics(),
+						v.fetchMetricsHistory(),
+						func() tea.Msg { return StatusMsg{Message: "Metrics enabled (press r to refresh)"} },
+					)
 				}
 			case "n", "N", "esc":
 				v.confirmAction = ""
@@ -392,7 +523,7 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			svc := v.selectedService()
 			if svc != nil {
-				taskView := NewTaskView(v.client, v.cluster, svc.Name, v.readOnly, v.refreshInterval, v.shell)
+				taskView := NewTaskView(v.client, v.cluster, svc.Name, v.profile, v.region, v.readOnly, v.refreshInterval, v.shell)
 				return v, func() tea.Msg {
 					return PushViewMsg{View: taskView}
 				}
@@ -405,6 +536,34 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return PushViewMsg{View: eventsView}
 				}
 			}
+		case "D":
+			svc := v.selectedService()
+			if svc != nil {
+				deployView := NewDeploymentView(v.client, v.cluster, svc.Name, v.refreshInterval)
+				return v, func() tea.Msg {
+					return PushViewMsg{View: deployView}
+				}
+			}
+		case "m":
+			if v.metricsEnabled {
+				v.metricsEnabled = false
+				v.metrics = make(map[string]*awsclient.ServiceMetrics)
+				v.metricsHist = make(map[string]*awsclient.ServiceMetricsHistory)
+				v.rebuildTable()
+				return v, func() tea.Msg {
+					return StatusMsg{Message: "Metrics disabled"}
+				}
+			}
+			svcCount := len(v.services)
+			costPerRefresh := float64(svcCount*2) / 1000.0 * 0.01
+			v.confirmAction = "enable-metrics"
+			v.confirmMsg = fmt.Sprintf(
+				"Enable CloudWatch metrics for %d services?\n"+
+					"  Cost: ~$%.4f per refresh (manual only)\n"+
+					"  Estimated: ~$%.2f/month at 100 refreshes/day\n"+
+					"Enable? (y/n)",
+				svcCount, costPerRefresh, costPerRefresh*100*22)
+			return v, nil
 		case "f":
 			if v.readOnly {
 				return v, func() tea.Msg {
@@ -438,8 +597,11 @@ func (v *ServiceView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			v.filterInput.Focus()
 			return v, textinput.Blink
 		case "r":
-			// Refresh in-place without clearing the table (same as auto-refresh)
-			return v, v.fetchServices()
+			cmds := []tea.Cmd{v.fetchServices()}
+			if v.metricsEnabled {
+				cmds = append(cmds, v.fetchMetrics(), v.fetchMetricsHistory())
+			}
+			return v, tea.Batch(cmds...)
 		case "esc":
 			if v.filterText != "" {
 				v.filterText = ""
@@ -522,15 +684,23 @@ func (v *ServiceView) rebuildTable() {
 	prevCursor := v.table.Cursor()
 
 	rcols := []responsiveColumn{
-		{Title: "Service", MinWidth: 15, Flex: 3},
-		{Title: "Status", MinWidth: 10, Flex: 0},
-		{Title: "Run/Des", MinWidth: 9, Flex: 0},
-		{Title: "CPU Res", MinWidth: 9, Flex: 0},
-		{Title: "Mem Res", MinWidth: 9, Flex: 0},
-		{Title: "CPU %", MinWidth: 8, Flex: 0},
-		{Title: "Mem %", MinWidth: 8, Flex: 0},
-		{Title: "Last Event", MinWidth: 15, Flex: 4},
+		{Title: "Service", MinWidth: 12, Flex: 3},
+		{Title: "Status", MinWidth: 8, Flex: 0},
+		{Title: "Deploy", MinWidth: 5, Flex: 0},
+		{Title: "Run/Des", MinWidth: 7, Flex: 0},
+		{Title: "CPU Res", MinWidth: 7, Flex: 0},
+		{Title: "Mem Res", MinWidth: 7, Flex: 0},
 	}
+	// CPU%/Mem% columns only when metrics enabled — saves space otherwise
+	cpuColIdx, memColIdx := -1, -1
+	if v.metricsEnabled {
+		cpuColIdx = len(rcols)
+		rcols = append(rcols, responsiveColumn{Title: "CPU %", MinWidth: 7, Flex: 1})
+		memColIdx = len(rcols)
+		rcols = append(rcols, responsiveColumn{Title: "Mem %", MinWidth: 7, Flex: 1})
+	}
+	rcols = append(rcols, responsiveColumn{Title: "Last Event", MinWidth: 15, Flex: 4})
+
 	widths := calcColumnWidths(rcols, v.width)
 	columns := make([]table.Column, len(rcols))
 	for i, rc := range rcols {
@@ -556,32 +726,51 @@ func (v *ServiceView) rebuildTable() {
 			}
 		}
 
-		cpuPct, memPct := "...", "..."
-		if m, ok := v.metrics[svc.Name]; ok {
-			if m.CPUUtilization != nil {
-				cpuPct = fmt.Sprintf("%.1f%%", *m.CPUUtilization)
-			} else {
-				cpuPct = "-"
-			}
-			if m.MemoryUtilization != nil {
-				memPct = fmt.Sprintf("%.1f%%", *m.MemoryUtilization)
-			} else {
-				memPct = "-"
-			}
+		// Deployment status
+		deployLabel := "..."
+		if di, ok := v.deployments[svc.Name]; ok {
+			deployLabel = awsclient.DeploymentStatusLabel(di.Deployments)
 		}
 
 		runDes := fmt.Sprintf("%d/%d", svc.RunningCount, svc.DesiredCount)
 
-		rows = append(rows, table.Row{
+		row := table.Row{
 			svc.Name,
 			svc.Status,
+			deployLabel,
 			runDes,
 			cpuRes,
 			memRes,
-			cpuPct,
-			memPct,
-			svc.LastEvent,
-		})
+		}
+
+		if v.metricsEnabled {
+			cpuPct, memPct := "...", "..."
+			if m, ok := v.metrics[svc.Name]; ok {
+				if m.CPUUtilization != nil {
+					cpuPct = fmt.Sprintf("%.1f%%", *m.CPUUtilization)
+				} else {
+					cpuPct = "-"
+				}
+				if m.MemoryUtilization != nil {
+					memPct = fmt.Sprintf("%.1f%%", *m.MemoryUtilization)
+				} else {
+					memPct = "-"
+				}
+			}
+			// Prepend sparkline if history available — width-aware to handle CJK terminals
+			if h, ok := v.metricsHist[svc.Name]; ok {
+				if len(h.CPUValues) > 0 && cpuPct != "..." {
+					cpuPct = SparklineFit(h.CPUValues, widths[cpuColIdx], cpuPct)
+				}
+				if len(h.MemoryValues) > 0 && memPct != "..." {
+					memPct = SparklineFit(h.MemoryValues, widths[memColIdx], memPct)
+				}
+			}
+			row = append(row, cpuPct, memPct)
+		}
+
+		row = append(row, svc.LastEvent)
+		rows = append(rows, row)
 	}
 
 	tableHeight := v.height - 3 // -1 for updated line, -2 for table padding

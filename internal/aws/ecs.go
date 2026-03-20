@@ -3,12 +3,14 @@ package aws
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 	ecstypes "github.com/aws/aws-sdk-go-v2/service/ecs/types"
+	"golang.org/x/sync/errgroup"
 )
 
 type ClusterInfo struct {
@@ -219,14 +221,21 @@ func (c *Client) ListTasks(ctx context.Context, cluster, service string, desired
 	return tasks, nil
 }
 
-// ListTasksAll fetches both RUNNING and STOPPED tasks and merges the results.
+// ListTasksAll fetches both RUNNING and STOPPED tasks in parallel and merges the results.
 func (c *Client) ListTasksAll(ctx context.Context, cluster, service string) ([]TaskInfo, error) {
-	running, err := c.ListTasks(ctx, cluster, service, ecstypes.DesiredStatusRunning)
-	if err != nil {
-		return nil, err
-	}
-	stopped, err := c.ListTasks(ctx, cluster, service, ecstypes.DesiredStatusStopped)
-	if err != nil {
+	g, ctx := errgroup.WithContext(ctx)
+	var running, stopped []TaskInfo
+	g.Go(func() error {
+		var err error
+		running, err = c.ListTasks(ctx, cluster, service, ecstypes.DesiredStatusRunning)
+		return err
+	})
+	g.Go(func() error {
+		var err error
+		stopped, err = c.ListTasks(ctx, cluster, service, ecstypes.DesiredStatusStopped)
+		return err
+	})
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 	return append(running, stopped...), nil
@@ -352,6 +361,170 @@ func (c *Client) StopTask(ctx context.Context, cluster, taskARN, reason string) 
 		return fmt.Errorf("stop task: %w", err)
 	}
 	return nil
+}
+
+// --- Deployment types and methods (Phase 2) ---
+
+type DeploymentInfo struct {
+	ID                 string
+	Status             string // PRIMARY, ACTIVE, INACTIVE
+	TaskDefinition     string // short form: "my-app:5"
+	TaskDefinitionFull string // full ARN (for diff)
+	RunningCount       int32
+	DesiredCount       int32
+	PendingCount       int32
+	FailedTasks        int32
+	RolloutState       string // COMPLETED, IN_PROGRESS, FAILED
+	RolloutStateReason string
+	CreatedAt          *time.Time
+	UpdatedAt          *time.Time
+}
+
+type DeploymentConfig struct {
+	MaximumPercent         int32
+	MinimumHealthyPercent  int32
+	CircuitBreakerEnabled  bool
+	CircuitBreakerRollback bool
+}
+
+type ServiceDeploymentInfo struct {
+	ServiceName      string
+	Deployments      []DeploymentInfo
+	DeploymentConfig DeploymentConfig
+}
+
+func (c *Client) GetServiceDeployments(ctx context.Context, cluster, serviceName string) (*ServiceDeploymentInfo, error) {
+	out, err := c.ECS.DescribeServices(ctx, &ecs.DescribeServicesInput{
+		Cluster:  aws.String(cluster),
+		Services: []string{serviceName},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describing service for deployments: %w", err)
+	}
+	if len(out.Services) == 0 {
+		return nil, fmt.Errorf("service %s not found", serviceName)
+	}
+
+	svc := out.Services[0]
+	info := &ServiceDeploymentInfo{
+		ServiceName: serviceName,
+	}
+
+	// Deployment configuration
+	if dc := svc.DeploymentConfiguration; dc != nil {
+		info.DeploymentConfig.MaximumPercent = aws.ToInt32(dc.MaximumPercent)
+		info.DeploymentConfig.MinimumHealthyPercent = aws.ToInt32(dc.MinimumHealthyPercent)
+		if cb := dc.DeploymentCircuitBreaker; cb != nil {
+			info.DeploymentConfig.CircuitBreakerEnabled = cb.Enable
+			info.DeploymentConfig.CircuitBreakerRollback = cb.Rollback
+		}
+	}
+
+	// Deployments
+	for _, d := range svc.Deployments {
+		dep := DeploymentInfo{
+			ID:                 aws.ToString(d.Id),
+			Status:             aws.ToString(d.Status),
+			TaskDefinitionFull: aws.ToString(d.TaskDefinition),
+			TaskDefinition:     shortTaskDef(aws.ToString(d.TaskDefinition)),
+			RunningCount:       d.RunningCount,
+			DesiredCount:       d.DesiredCount,
+			PendingCount:       d.PendingCount,
+			FailedTasks:        d.FailedTasks,
+			RolloutState:       string(d.RolloutState),
+			RolloutStateReason: aws.ToString(d.RolloutStateReason),
+		}
+		if d.CreatedAt != nil {
+			t := *d.CreatedAt
+			dep.CreatedAt = &t
+		}
+		if d.UpdatedAt != nil {
+			t := *d.UpdatedAt
+			dep.UpdatedAt = &t
+		}
+		info.Deployments = append(info.Deployments, dep)
+	}
+
+	return info, nil
+}
+
+// --- TaskDefinitionDetail types and methods (Phase 3) ---
+
+type TaskDefinitionDetail struct {
+	Family      string
+	Revision    int32
+	CPU         string
+	Memory      string
+	Images      map[string]string            // containerName -> image:tag
+	Environment map[string]map[string]string // containerName -> key -> value
+	TaskRoleARN string
+	ExecRoleARN string
+}
+
+func (c *Client) DescribeTaskDefinitionDetail(ctx context.Context, taskDefARN string) (*TaskDefinitionDetail, error) {
+	out, _, err := c.describeTaskDef(ctx, taskDefARN)
+	if err != nil {
+		return nil, err
+	}
+	td := out.TaskDefinition
+	detail := &TaskDefinitionDetail{
+		Family:      aws.ToString(td.Family),
+		Revision:    td.Revision,
+		CPU:         aws.ToString(td.Cpu),
+		Memory:      aws.ToString(td.Memory),
+		TaskRoleARN: aws.ToString(td.TaskRoleArn),
+		ExecRoleARN: aws.ToString(td.ExecutionRoleArn),
+		Images:      make(map[string]string),
+		Environment: make(map[string]map[string]string),
+	}
+	for _, cd := range td.ContainerDefinitions {
+		name := aws.ToString(cd.Name)
+		detail.Images[name] = aws.ToString(cd.Image)
+		env := make(map[string]string)
+		for _, kv := range cd.Environment {
+			env[aws.ToString(kv.Name)] = aws.ToString(kv.Value)
+		}
+		if len(env) > 0 {
+			detail.Environment[name] = env
+		}
+	}
+	return detail, nil
+}
+
+// --- Deployment status helpers ---
+
+// DeploymentStatusLabel returns a short label for service deployment state.
+// Used in the services table "Deploy" column.
+func DeploymentStatusLabel(deployments []DeploymentInfo) string {
+	if len(deployments) == 0 {
+		return "-"
+	}
+	for _, d := range deployments {
+		if d.RolloutState == "FAILED" {
+			return "FAIL"
+		}
+	}
+	if len(deployments) > 1 {
+		for _, d := range deployments {
+			if d.RolloutState == "IN_PROGRESS" {
+				return "ROLL"
+			}
+		}
+	}
+	if len(deployments) == 1 && deployments[0].RolloutState == "COMPLETED" {
+		return "OK"
+	}
+	return "OK"
+}
+
+// SortedEnvKeys returns sorted environment variable keys for display.
+func SortedEnvKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func extractTaskID(taskARN string) string {

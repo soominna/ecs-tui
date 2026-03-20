@@ -17,9 +17,11 @@ import (
 // App is the root model that manages the view stack.
 type App struct {
 	stack    []View
-	client   *awsclient.Client
+	client   awsclient.ECSAPI
 	cluster  string
 	service  string
+	profile  string
+	region   string
 	readOnly bool
 	width    int
 	height   int
@@ -29,9 +31,11 @@ type App struct {
 	// Config
 	refreshInterval time.Duration // negative = disabled, 0 = default (10s)
 	shell           string        // shell for exec (default: /bin/sh)
+	metricsEnabled  bool          // CloudWatch metrics enabled
+	taskDefCache    map[string]*awsclient.TaskDefinitionInfo
 }
 
-func NewApp(client *awsclient.Client, cluster, service string, refreshInterval int, shell string, readOnly bool) *App {
+func NewApp(client *awsclient.Client, cluster, service string, refreshInterval int, shell string, readOnly bool, metricsEnabled bool, profile, region string) *App {
 	var interval time.Duration
 	if refreshInterval < 0 {
 		interval = -1
@@ -49,9 +53,13 @@ func NewApp(client *awsclient.Client, cluster, service string, refreshInterval i
 		client:          client,
 		cluster:         cluster,
 		service:         service,
+		profile:         profile,
+		region:          region,
 		readOnly:        readOnly,
 		refreshInterval: interval,
 		shell:           shell,
+		metricsEnabled:  metricsEnabled,
+		taskDefCache:    make(map[string]*awsclient.TaskDefinitionInfo),
 	}
 }
 
@@ -69,12 +77,12 @@ func (a *App) Init() tea.Cmd {
 	}
 
 	if a.service != "" {
-		view := NewTaskView(a.client, a.cluster, a.service, a.readOnly, a.refreshInterval, a.shell)
+		view := NewTaskView(a.client, a.cluster, a.service, a.profile, a.region, a.readOnly, a.refreshInterval, a.shell)
 		a.stack = []View{view}
 		return view.Init()
 	}
 
-	view := NewServiceView(a.client, a.cluster, a.readOnly, a.refreshInterval, a.shell)
+	view := NewServiceView(a.client, a.cluster, a.profile, a.region, a.readOnly, a.refreshInterval, a.shell, a.metricsEnabled, a.taskDefCache)
 	a.stack = []View{view}
 	return view.Init()
 }
@@ -139,7 +147,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		//  ...
 		case "P", "p":
 			if a.client != nil {
-				configView := NewConfigViewWithCurrent(a.client.Profile, a.client.Region)
+				configView := NewConfigViewWithCurrent(a.profile, a.region)
 				return a, func() tea.Msg {
 					return PushViewMsg{View: configView}
 				}
@@ -222,12 +230,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case awsClientReadyMsg:
 		a.client = msg.Client
+		a.profile = msg.Profile
+		a.region = msg.Region
 		// Best-effort session save; don't block on failure
 		_ = awsclient.SaveLastSession(msg.Profile, msg.Region, CurrentThemeName()) //nolint:errcheck
 		a.cluster = ""
 		a.service = ""
 		a.err = nil
 		a.status = ""
+		a.taskDefCache = make(map[string]*awsclient.TaskDefinitionInfo)
 		// Close all existing views
 		for _, v := range a.stack {
 			closeView(v)
@@ -236,6 +247,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.stack = []View{clusterView}
 		return a, clusterView.Init()
 
+	case taskDefCacheUpdateMsg:
+		for k, v := range msg.Defs {
+			a.taskDefCache[k] = v
+		}
+		return a, nil
 
 	case awsClientErrorMsg:
 		a.err = msg.Err
@@ -244,7 +260,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ClusterSelectedMsg:
 		a.cluster = msg.ClusterName
-		serviceView := NewServiceView(a.client, a.cluster, a.readOnly, a.refreshInterval, a.shell)
+		serviceView := NewServiceView(a.client, a.cluster, a.profile, a.region, a.readOnly, a.refreshInterval, a.shell, a.metricsEnabled, a.taskDefCache)
 		return a, func() tea.Msg {
 			return PushViewMsg{View: serviceView}
 		}
@@ -293,11 +309,11 @@ func (a *App) renderHeader() string {
 	// Build info text
 	var infoParts []string
 	if a.client != nil {
-		if a.client.Profile != "" {
-			infoParts = append(infoParts, fmt.Sprintf("Profile: %s", a.client.Profile))
+		if a.profile != "" {
+			infoParts = append(infoParts, fmt.Sprintf("Profile: %s", a.profile))
 		}
-		if a.client.Region != "" {
-			infoParts = append(infoParts, fmt.Sprintf("Region: %s", a.client.Region))
+		if a.region != "" {
+			infoParts = append(infoParts, fmt.Sprintf("Region: %s", a.region))
 		}
 	}
 	if a.cluster != "" {

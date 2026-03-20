@@ -13,7 +13,7 @@ import (
 )
 
 type DetailView struct {
-	client   *awsclient.Client
+	client   awsclient.ECSAPI
 	task     *awsclient.TaskInfo
 	taskDef  *awsclient.TaskDefinitionInfo
 	viewport viewport.Model
@@ -26,7 +26,7 @@ type taskDefDetailMsg struct {
 	def *awsclient.TaskDefinitionInfo
 }
 
-func NewDetailView(client *awsclient.Client, task *awsclient.TaskInfo) *DetailView {
+func NewDetailView(client awsclient.ECSAPI, task *awsclient.TaskInfo) *DetailView {
 	return &DetailView{
 		client: client,
 		task:   task,

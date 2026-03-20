@@ -71,6 +71,11 @@ type AccessDeniedMsg struct {
 // themeChangedMsg signals that the dark/light theme was toggled.
 type themeChangedMsg struct{}
 
+// taskDefCacheUpdateMsg updates the app-level task definition cache.
+type taskDefCacheUpdateMsg struct {
+	Defs map[string]*awsclient.TaskDefinitionInfo
+}
+
 // awsClientReadyMsg signals that a new AWS client was created successfully.
 type awsClientReadyMsg struct {
 	Client  *awsclient.Client

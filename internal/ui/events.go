@@ -13,7 +13,7 @@ import (
 )
 
 type ServiceEventsView struct {
-	client      *awsclient.Client
+	client      awsclient.ECSAPI
 	cluster     string
 	serviceName string
 	events      []awsclient.ServiceEvent
@@ -27,7 +27,7 @@ type eventsLoadedMsg struct {
 	events []awsclient.ServiceEvent
 }
 
-func NewServiceEventsView(client *awsclient.Client, cluster, serviceName string) *ServiceEventsView {
+func NewServiceEventsView(client awsclient.ECSAPI, cluster, serviceName string) *ServiceEventsView {
 	return &ServiceEventsView{
 		client:      client,
 		cluster:     cluster,

@@ -23,6 +23,7 @@ func main() {
 	service := flag.String("service", "", "ECS service name (requires --cluster)")
 	readOnly := flag.Bool("read-only", false, "Read-only mode (disable all mutative actions)")
 	refreshInterval := flag.Int("refresh", 0, "Auto-refresh interval in seconds (-1 to disable)")
+	metricsEnabled := flag.Bool("metrics", false, "Enable CloudWatch metrics (costs apply)")
 	flag.Parse()
 
 	if *showVersion {
@@ -53,6 +54,9 @@ func main() {
 	}
 	if !flagSet["refresh"] {
 		*refreshInterval = cfg.RefreshInterval
+	}
+	if !flagSet["metrics"] && cfg.Metrics {
+		*metricsEnabled = true
 	}
 
 	// Apply theme from config
@@ -89,7 +93,7 @@ func main() {
 		}
 	}
 
-	app := ui.NewApp(client, *cluster, *service, *refreshInterval, cfg.Shell, *readOnly)
+	app := ui.NewApp(client, *cluster, *service, *refreshInterval, cfg.Shell, *readOnly, *metricsEnabled, *profile, *region)
 
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {

@@ -17,9 +17,11 @@ import (
 )
 
 type TaskView struct {
-	client      *awsclient.Client
+	client      awsclient.ECSAPI
 	cluster     string
 	service     string
+	profile     string
+	region      string
 	table       table.Model
 	tasks       []awsclient.TaskInfo
 	width       int
@@ -52,7 +54,7 @@ type taskActionDoneMsg struct {
 
 type taskTickMsg time.Time
 
-func NewTaskView(client *awsclient.Client, cluster, service string, readOnly bool, refreshInterval time.Duration, shell string) *TaskView {
+func NewTaskView(client awsclient.ECSAPI, cluster, service, profile, region string, readOnly bool, refreshInterval time.Duration, shell string) *TaskView {
 	ti := textinput.New()
 	ti.Placeholder = "Filter tasks..."
 	ti.CharLimit = 50
@@ -65,6 +67,8 @@ func NewTaskView(client *awsclient.Client, cluster, service string, readOnly boo
 		client:           client,
 		cluster:          cluster,
 		service:          service,
+		profile:          profile,
+		region:           region,
 		filterInput:      ti,
 		readOnly:         readOnly,
 		refreshInterval:  refreshInterval,
@@ -304,8 +308,8 @@ func (v *TaskView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return v, execpkg.ExecContainer(
-				v.client.Profile,
-				v.client.Region,
+				v.profile,
+				v.region,
 				v.cluster,
 				v.service,
 				task.TaskID,

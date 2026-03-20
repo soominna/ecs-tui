@@ -10,7 +10,7 @@ import (
 )
 
 type ClusterView struct {
-	client   *awsclient.Client
+	client   awsclient.ECSAPI
 	list     list.Model
 	clusters []awsclient.ClusterInfo
 	width    int
@@ -30,7 +30,7 @@ type clustersLoadedMsg struct {
 	clusters []awsclient.ClusterInfo
 }
 
-func NewClusterView(client *awsclient.Client) *ClusterView {
+func NewClusterView(client awsclient.ECSAPI) *ClusterView {
 	return &ClusterView{client: client}
 }
 
