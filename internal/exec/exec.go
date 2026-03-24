@@ -18,6 +18,22 @@ type ExecDoneMsg struct {
 	ErrType string // error category for UI routing
 }
 
+// allowedShells is the set of shells permitted for ECS Exec.
+var allowedShells = []string{
+	"/bin/sh", "/bin/bash", "/bin/zsh", "/bin/ash",
+	"sh", "bash",
+}
+
+// ValidateShell checks if the given shell is in the allowlist.
+func ValidateShell(shell string) error {
+	for _, s := range allowedShells {
+		if shell == s {
+			return nil
+		}
+	}
+	return fmt.Errorf("shell %q is not allowed; permitted shells: %s", shell, strings.Join(allowedShells, ", "))
+}
+
 // ExecContainer uses aws ecs execute-command to attach to a container.
 // It suspends the TUI, runs the subprocess, and resumes the TUI when done.
 func ExecContainer(profile, region, cluster, service, taskID, container, shell string) tea.Cmd {
@@ -32,14 +48,24 @@ func ExecContainer(profile, region, cluster, service, taskID, container, shell s
 		}
 	}
 
+	// Validate shell against allowlist
+	if err := ValidateShell(shell); err != nil {
+		return func() tea.Msg {
+			return ExecDoneMsg{Err: err}
+		}
+	}
+
 	// Validate arguments don't start with "-" to prevent argument injection
-	for name, val := range map[string]string{
-		"cluster": cluster, "task": taskID, "container": container,
-		"profile": profile, "region": region,
+	for _, arg := range []struct{ name, val string }{
+		{"cluster", cluster},
+		{"container", container},
+		{"profile", profile},
+		{"region", region},
+		{"task", taskID},
 	} {
-		if val != "" && strings.HasPrefix(val, "-") {
+		if arg.val != "" && strings.HasPrefix(arg.val, "-") {
 			return func() tea.Msg {
-				return ExecDoneMsg{Err: fmt.Errorf("invalid %s value: %q", name, val)}
+				return ExecDoneMsg{Err: fmt.Errorf("invalid %s value: %q", arg.name, arg.val)}
 			}
 		}
 	}

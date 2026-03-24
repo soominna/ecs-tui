@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -17,10 +16,9 @@ type DeploymentView struct {
 	client          awsclient.ECSAPI
 	cluster         string
 	serviceName     string
-	deployInfo      *awsclient.ServiceDeploymentInfo
-	viewport        viewport.Model
-	width, height   int
-	ready           bool
+	deployInfo    *awsclient.ServiceDeploymentInfo
+	vh            viewportHelper
+	width, height int
 	lastUpdated     time.Time
 	refreshInterval time.Duration
 }
@@ -58,16 +56,7 @@ func (v *DeploymentView) Init() tea.Cmd {
 }
 
 func (v *DeploymentView) tickCmd() tea.Cmd {
-	if v.refreshInterval < 0 {
-		return nil
-	}
-	interval := v.refreshInterval
-	if interval == 0 {
-		interval = 10 * time.Second
-	}
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
-		return deploymentTickMsg(t)
-	})
+	return newTickCmd(v.refreshInterval, func(t time.Time) deploymentTickMsg { return deploymentTickMsg(t) })
 }
 
 func (v *DeploymentView) fetchDeployments() tea.Cmd {
@@ -90,21 +79,15 @@ func (v *DeploymentView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		v.width = msg.Width
 		v.height = msg.Height
-		if !v.ready {
-			v.viewport = viewport.New(v.width, v.height)
-			v.ready = true
-		} else {
-			v.viewport.Width = v.width
-			v.viewport.Height = v.height
-		}
-		v.viewport.SetContent(v.renderContent())
+		v.vh.handleResize(v.width, v.height)
+		v.vh.viewport.SetContent(v.renderContent())
 		return v, nil
 
 	case deploymentLoadedMsg:
 		v.deployInfo = msg.info
 		v.lastUpdated = time.Now()
-		if v.ready {
-			v.viewport.SetContent(v.renderContent())
+		if v.vh.ready {
+			v.vh.viewport.SetContent(v.renderContent())
 		}
 		return v, nil
 
@@ -135,19 +118,19 @@ func (v *DeploymentView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if v.ready {
+	if v.vh.ready {
 		var cmd tea.Cmd
-		v.viewport, cmd = v.viewport.Update(msg)
+		v.vh.viewport, cmd = v.vh.viewport.Update(msg)
 		return v, cmd
 	}
 	return v, nil
 }
 
 func (v *DeploymentView) View() string {
-	if !v.ready {
+	if !v.vh.ready {
 		return loadingStyle.Render("  Loading deployments...")
 	}
-	return v.viewport.View()
+	return v.vh.viewport.View()
 }
 
 func renderProgress(running, desired int32) string {

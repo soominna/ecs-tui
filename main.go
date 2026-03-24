@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -64,7 +65,7 @@ func main() {
 		ui.ApplyTheme(cfg.Theme)
 	}
 
-	var client *awsclient.Client
+	var client awsclient.ECSAPI
 	var err error
 
 	// If no CLI flags, try restoring last session, then detect current config
@@ -81,7 +82,9 @@ func main() {
 	}
 
 	if *profile != "" || *region != "" {
-		client, err = awsclient.NewClient(context.Background(), *profile, *region)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		client, err = awsclient.NewClient(ctx, *profile, *region)
 		if err != nil {
 			// Don't exit — fall through to ConfigView so user can fix settings
 			fmt.Fprintf(os.Stderr, "Warning: could not connect to AWS (%v), opening config view...\n", err)

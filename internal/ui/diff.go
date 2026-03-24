@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -18,12 +17,11 @@ type TaskDefDiffView struct {
 	newARN       string
 	oldShort     string
 	newShort     string
-	diffs        []awsclient.DiffEntry
-	viewport     viewport.Model
-	width        int
-	height       int
-	ready        bool
-	loaded       bool
+	diffs  []awsclient.DiffEntry
+	vh     viewportHelper
+	width  int
+	height int
+	loaded bool
 }
 
 type diffLoadedMsg struct {
@@ -76,21 +74,15 @@ func (v *TaskDefDiffView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		v.width = msg.Width
 		v.height = msg.Height
-		if !v.ready {
-			v.viewport = viewport.New(v.width, v.height)
-			v.ready = true
-		} else {
-			v.viewport.Width = v.width
-			v.viewport.Height = v.height
-		}
-		v.viewport.SetContent(v.renderContent())
+		v.vh.handleResize(v.width, v.height)
+		v.vh.viewport.SetContent(v.renderContent())
 		return v, nil
 
 	case diffLoadedMsg:
 		v.diffs = msg.diffs
 		v.loaded = true
-		if v.ready {
-			v.viewport.SetContent(v.renderContent())
+		if v.vh.ready {
+			v.vh.viewport.SetContent(v.renderContent())
 		}
 		return v, nil
 
@@ -101,19 +93,19 @@ func (v *TaskDefDiffView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if v.ready {
+	if v.vh.ready {
 		var cmd tea.Cmd
-		v.viewport, cmd = v.viewport.Update(msg)
+		v.vh.viewport, cmd = v.vh.viewport.Update(msg)
 		return v, cmd
 	}
 	return v, nil
 }
 
 func (v *TaskDefDiffView) View() string {
-	if !v.ready {
+	if !v.vh.ready {
 		return loadingStyle.Render("  Loading diff...")
 	}
-	return v.viewport.View()
+	return v.vh.viewport.View()
 }
 
 func (v *TaskDefDiffView) renderContent() string {

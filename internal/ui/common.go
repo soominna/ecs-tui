@@ -78,7 +78,7 @@ type taskDefCacheUpdateMsg struct {
 
 // awsClientReadyMsg signals that a new AWS client was created successfully.
 type awsClientReadyMsg struct {
-	Client  *awsclient.Client
+	Client  awsclient.ECSAPI
 	Profile string
 	Region  string
 }
@@ -86,4 +86,18 @@ type awsClientReadyMsg struct {
 // awsClientErrorMsg signals that AWS client creation failed.
 type awsClientErrorMsg struct {
 	Err error
+}
+
+// newTickCmd creates a tick command with default interval handling.
+// Returns nil if interval is negative (disabled), defaults to 10s if zero.
+func newTickCmd[T any](interval time.Duration, convert func(time.Time) T) tea.Cmd {
+	if interval < 0 {
+		return nil
+	}
+	if interval == 0 {
+		interval = 10 * time.Second
+	}
+	return tea.Tick(interval, func(t time.Time) tea.Msg {
+		return convert(t)
+	})
 }

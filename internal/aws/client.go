@@ -10,22 +10,34 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/applicationautoscaling"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatch"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 )
 
 var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-\d+$`)
+var profilePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 type Client struct {
-	ECS     *ecs.Client
-	Logs    *cloudwatchlogs.Client
-	Metrics *cloudwatch.Client
-	Profile string
-	Region  string
+	ECS         *ecs.Client
+	Logs        *cloudwatchlogs.Client
+	Metrics     *cloudwatch.Client
+	SSM         *ssm.Client
+	AutoScaling *applicationautoscaling.Client
+	Profile     string
+	Region      string
 }
 
 func NewClient(ctx context.Context, profile, region string) (*Client, error) {
+	if region != "" && !regionPattern.MatchString(region) {
+		return nil, fmt.Errorf("invalid region format: %q", region)
+	}
+	if profile != "" && !profilePattern.MatchString(profile) {
+		return nil, fmt.Errorf("invalid profile format: %q", profile)
+	}
+
 	var opts []func(*config.LoadOptions) error
 
 	if profile != "" {
@@ -45,11 +57,13 @@ func NewClient(ctx context.Context, profile, region string) (*Client, error) {
 	}
 
 	return &Client{
-		ECS:     ecs.NewFromConfig(cfg),
-		Logs:    cloudwatchlogs.NewFromConfig(cfg),
-		Metrics: cloudwatch.NewFromConfig(cfg),
-		Profile: profile,
-		Region:  region,
+		ECS:         ecs.NewFromConfig(cfg),
+		Logs:        cloudwatchlogs.NewFromConfig(cfg),
+		Metrics:     cloudwatch.NewFromConfig(cfg),
+		SSM:         ssm.NewFromConfig(cfg),
+		AutoScaling: applicationautoscaling.NewFromConfig(cfg),
+		Profile:     profile,
+		Region:      region,
 	}, nil
 }
 

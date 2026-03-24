@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -36,12 +37,31 @@ func ConfigFilePath() string {
 	return filepath.Join(home, ".config", "ecs-tui", "config.yml")
 }
 
+// validateConfigFile checks that path is a regular file and not group/world-writable.
+func validateConfigFile(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return fmt.Errorf("config file is not a regular file: %s", path)
+	}
+	if info.Mode().Perm()&0o022 != 0 {
+		return fmt.Errorf("config file %s has unsafe permissions %04o (group/world-writable)", path, info.Mode().Perm())
+	}
+	return nil
+}
+
 // Load reads config.yml and returns a Config.
 // Returns defaults if the file doesn't exist or fails to parse.
 func Load() *Config {
 	cfg := DefaultConfig()
 	path := ConfigFilePath()
 	if path == "" {
+		return cfg
+	}
+
+	if err := validateConfigFile(path); err != nil {
 		return cfg
 	}
 
@@ -60,6 +80,11 @@ func Load() *Config {
 // LoadFrom reads a config from the specified path.
 func LoadFrom(path string) *Config {
 	cfg := DefaultConfig()
+
+	if err := validateConfigFile(path); err != nil {
+		return cfg
+	}
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return cfg

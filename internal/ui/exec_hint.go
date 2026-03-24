@@ -4,19 +4,17 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
 // ExecHintView shows exec error details with actionable fix instructions.
 type ExecHintView struct {
-	errMsg   string
-	hint     string
-	viewport viewport.Model
-	width    int
-	height   int
-	ready    bool
+	errMsg string
+	hint   string
+	vh     viewportHelper
+	width  int
+	height int
 }
 
 func NewExecHintView(errMsg, hint string) *ExecHintView {
@@ -42,19 +40,13 @@ func (v *ExecHintView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		v.width = msg.Width
 		v.height = msg.Height
-		if !v.ready {
-			v.viewport = viewport.New(v.width, v.height)
-			v.ready = true
-		} else {
-			v.viewport.Width = v.width
-			v.viewport.Height = v.height
-		}
-		v.viewport.SetContent(v.renderContent())
+		v.vh.handleResize(v.width, v.height)
+		v.vh.viewport.SetContent(v.renderContent())
 		return v, nil
 
 	case themeChangedMsg:
-		if v.ready {
-			v.viewport.SetContent(v.renderContent())
+		if v.vh.ready {
+			v.vh.viewport.SetContent(v.renderContent())
 		}
 		return v, nil
 
@@ -65,19 +57,19 @@ func (v *ExecHintView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if v.ready {
+	if v.vh.ready {
 		var cmd tea.Cmd
-		v.viewport, cmd = v.viewport.Update(msg)
+		v.vh.viewport, cmd = v.vh.viewport.Update(msg)
 		return v, cmd
 	}
 	return v, nil
 }
 
 func (v *ExecHintView) View() string {
-	if !v.ready {
+	if !v.vh.ready {
 		return ""
 	}
-	return v.viewport.View()
+	return v.vh.viewport.View()
 }
 
 func (v *ExecHintView) renderContent() string {

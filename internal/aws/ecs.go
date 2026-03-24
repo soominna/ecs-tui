@@ -36,6 +36,7 @@ type TaskInfo struct {
 	StartedAt     *time.Time
 	HealthStatus  string
 	ContainerName string
+	RuntimeId     string
 	TaskDefARN    string
 }
 

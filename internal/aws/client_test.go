@@ -30,6 +30,22 @@ func TestCommonRegions(t *testing.T) {
 	}
 }
 
+func TestProfilePattern(t *testing.T) {
+	valid := []string{"default", "my-profile", "prod_account", "test123", "A-Z_0"}
+	invalid := []string{"", "my profile", "prof;evil", "a/b", "test@user", "pro.file"}
+
+	for _, p := range valid {
+		if !profilePattern.MatchString(p) {
+			t.Errorf("profilePattern should match %q", p)
+		}
+	}
+	for _, p := range invalid {
+		if profilePattern.MatchString(p) {
+			t.Errorf("profilePattern should not match %q", p)
+		}
+	}
+}
+
 func TestRegionPattern(t *testing.T) {
 	valid := []string{
 		"us-east-1",

@@ -2,10 +2,12 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	smithy "github.com/aws/smithy-go"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/charmbracelet/lipgloss"
@@ -35,7 +37,7 @@ type App struct {
 	taskDefCache    map[string]*awsclient.TaskDefinitionInfo
 }
 
-func NewApp(client *awsclient.Client, cluster, service string, refreshInterval int, shell string, readOnly bool, metricsEnabled bool, profile, region string) *App {
+func NewApp(client awsclient.ECSAPI, cluster, service string, refreshInterval int, shell string, readOnly bool, metricsEnabled bool, profile, region string) *App {
 	var interval time.Duration
 	if refreshInterval < 0 {
 		interval = -1
@@ -392,6 +394,15 @@ func isAccessDenied(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Structured check using smithy-go API error
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		switch apiErr.ErrorCode() {
+		case "AccessDeniedException", "AccessDenied", "UnauthorizedAccess":
+			return true
+		}
+	}
+	// Fallback to string matching for wrapped/non-smithy errors
 	msg := err.Error()
 	return strings.Contains(msg, "AccessDeniedException") ||
 		strings.Contains(msg, "AccessDenied") ||

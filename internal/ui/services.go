@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/sync/errgroup"
 
 	awsclient "github.com/soominna/ecs-tui/internal/aws"
 )
@@ -161,16 +162,7 @@ func (v *ServiceView) Init() tea.Cmd {
 }
 
 func (v *ServiceView) tickCmd() tea.Cmd {
-	if v.refreshInterval < 0 {
-		return nil
-	}
-	interval := v.refreshInterval
-	if interval == 0 {
-		interval = 10 * time.Second
-	}
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
-		return serviceTickMsg(t)
-	})
+	return newTickCmd(v.refreshInterval, func(t time.Time) serviceTickMsg { return serviceTickMsg(t) })
 }
 
 func (v *ServiceView) fetchServices() tea.Cmd {
@@ -214,28 +206,26 @@ func (v *ServiceView) fetchTaskDefs() tea.Cmd {
 
 		// Fetch in parallel with bounded concurrency
 		var mu sync.Mutex
-		var wg sync.WaitGroup
 		defs := make(map[string]*awsclient.TaskDefinitionInfo)
 		var fetchErrors []string
-		sem := make(chan struct{}, 5) // max 5 concurrent API calls
 
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(5)
 		for _, taskDef := range unique {
-			wg.Add(1)
-			go func(td string) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				info, err := client.DescribeTaskDefinition(ctx, td)
+			td := taskDef
+			g.Go(func() error {
+				info, err := client.DescribeTaskDefinition(gctx, td)
 				mu.Lock()
 				defer mu.Unlock()
 				if err != nil {
 					fetchErrors = append(fetchErrors, fmt.Sprintf("%s: %v", td, err))
-					return
+					return nil // non-fatal
 				}
 				defs[td] = info
-			}(taskDef)
+				return nil
+			})
 		}
-		wg.Wait()
+		g.Wait()
 		return taskDefsLoadedMsg{defs: defs, errors: fetchErrors}
 	}
 }
@@ -275,25 +265,24 @@ func (v *ServiceView) fetchDeployments() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), apiTimeout)
 		defer cancel()
 		result := make(map[string]*awsclient.ServiceDeploymentInfo)
-		sem := make(chan struct{}, 5)
 		var mu sync.Mutex
-		var wg sync.WaitGroup
+
+		g, gctx := errgroup.WithContext(ctx)
+		g.SetLimit(5)
 		for _, name := range names {
-			wg.Add(1)
-			go func(n string) {
-				defer wg.Done()
-				sem <- struct{}{}
-				defer func() { <-sem }()
-				info, err := client.GetServiceDeployments(ctx, cluster, n)
+			n := name
+			g.Go(func() error {
+				info, err := client.GetServiceDeployments(gctx, cluster, n)
 				if err != nil {
-					return // non-fatal
+					return nil // non-fatal
 				}
 				mu.Lock()
 				result[n] = info
 				mu.Unlock()
-			}(name)
+				return nil
+			})
 		}
-		wg.Wait()
+		g.Wait()
 		return serviceDeploymentsLoadedMsg{deployments: result}
 	}
 }

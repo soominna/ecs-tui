@@ -36,6 +36,12 @@ func SaveLastSession(profile, region, theme string) error {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("setting session dir permissions: %w", err)
 	}
+	// Reject symlinks and non-regular files to prevent symlink attacks
+	if info, err := os.Lstat(p); err == nil {
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("session file is not a regular file: %s", p)
+		}
+	}
 	data, err := json.Marshal(LastSession{Profile: profile, Region: region, Theme: theme})
 	if err != nil {
 		return fmt.Errorf("marshaling session: %w", err)
@@ -61,6 +67,12 @@ func LoadLastSession() *LastSession {
 	p := sessionFilePath()
 	if p == "" {
 		return nil
+	}
+	// Reject symlinks and non-regular files
+	if info, err := os.Lstat(p); err == nil {
+		if !info.Mode().IsRegular() {
+			return nil
+		}
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {

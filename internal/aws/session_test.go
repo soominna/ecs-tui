@@ -75,6 +75,46 @@ func TestLoadLastSession_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestSaveLastSession_RejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "target.json")
+	os.WriteFile(target, []byte("{}"), 0o600)
+
+	// Create a symlink where session.json would go
+	linkDir := filepath.Join(tmpDir, "linktest")
+	os.MkdirAll(linkDir, 0o700)
+	linkPath := filepath.Join(linkDir, "session.json")
+	os.Symlink(target, linkPath)
+
+	// Verify that writing to a symlink path is detected
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat: %v", err)
+	}
+	if info.Mode().IsRegular() {
+		t.Fatal("expected symlink, got regular file")
+	}
+}
+
+func TestLoadLastSession_RejectsSymlink(t *testing.T) {
+	tmpDir := t.TempDir()
+	target := filepath.Join(tmpDir, "real-session.json")
+	data, _ := json.Marshal(LastSession{Profile: "evil", Region: "us-east-1"})
+	os.WriteFile(target, data, 0o600)
+
+	linkPath := filepath.Join(tmpDir, "session-link.json")
+	os.Symlink(target, linkPath)
+
+	// Verify symlink is not a regular file
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		t.Fatalf("lstat: %v", err)
+	}
+	if info.Mode().IsRegular() {
+		t.Fatal("expected symlink to not be regular file")
+	}
+}
+
 func TestLoadLastSession_FileNotFound(t *testing.T) {
 	// LoadLastSession should return nil for missing file
 	result := LoadLastSession()

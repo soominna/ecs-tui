@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
@@ -15,11 +14,10 @@ import (
 type DetailView struct {
 	client   awsclient.ECSAPI
 	task     *awsclient.TaskInfo
-	taskDef  *awsclient.TaskDefinitionInfo
-	viewport viewport.Model
-	width    int
-	height   int
-	ready    bool
+	taskDef *awsclient.TaskDefinitionInfo
+	vh      viewportHelper
+	width   int
+	height  int
 }
 
 type taskDefDetailMsg struct {
@@ -64,26 +62,20 @@ func (v *DetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		v.width = msg.Width
 		v.height = msg.Height
-		if !v.ready {
-			v.viewport = viewport.New(v.width, v.height)
-			v.ready = true
-		} else {
-			v.viewport.Width = v.width
-			v.viewport.Height = v.height
-		}
-		v.viewport.SetContent(v.renderContent())
+		v.vh.handleResize(v.width, v.height)
+		v.vh.viewport.SetContent(v.renderContent())
 		return v, nil
 
 	case themeChangedMsg:
-		if v.ready {
-			v.viewport.SetContent(v.renderContent())
+		if v.vh.ready {
+			v.vh.viewport.SetContent(v.renderContent())
 		}
 		return v, nil
 
 	case taskDefDetailMsg:
 		v.taskDef = msg.def
-		if v.ready {
-			v.viewport.SetContent(v.renderContent())
+		if v.vh.ready {
+			v.vh.viewport.SetContent(v.renderContent())
 		}
 		return v, nil
 
@@ -94,19 +86,19 @@ func (v *DetailView) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if v.ready {
+	if v.vh.ready {
 		var cmd tea.Cmd
-		v.viewport, cmd = v.viewport.Update(msg)
+		v.vh.viewport, cmd = v.vh.viewport.Update(msg)
 		return v, cmd
 	}
 	return v, nil
 }
 
 func (v *DetailView) View() string {
-	if !v.ready {
+	if !v.vh.ready {
 		return loadingStyle.Render("  Loading details...")
 	}
-	return v.viewport.View()
+	return v.vh.viewport.View()
 }
 
 func (v *DetailView) renderContent() string {

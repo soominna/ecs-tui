@@ -61,6 +61,37 @@ func TestBuildEnableExecHint(t *testing.T) {
 	})
 }
 
+func TestValidateShell(t *testing.T) {
+	valid := []string{"/bin/sh", "/bin/bash", "/bin/zsh", "/bin/ash", "sh", "bash"}
+	for _, s := range valid {
+		if err := ValidateShell(s); err != nil {
+			t.Errorf("ValidateShell(%q) = %v, want nil", s, err)
+		}
+	}
+
+	invalid := []string{"/bin/fish", "zsh", "python", "/usr/bin/bash", ""}
+	for _, s := range invalid {
+		if err := ValidateShell(s); err == nil {
+			t.Errorf("ValidateShell(%q) = nil, want error", s)
+		}
+	}
+}
+
+func TestExecContainer_ShellValidation(t *testing.T) {
+	cmd := ExecContainer("profile", "region", "cluster", "service", "task-123", "container", "/bin/fish")
+	msg := cmd()
+	done, ok := msg.(ExecDoneMsg)
+	if !ok {
+		t.Fatal("expected ExecDoneMsg")
+	}
+	if done.Err == nil {
+		t.Fatal("expected error for disallowed shell")
+	}
+	if !strings.Contains(done.Err.Error(), "not allowed") {
+		t.Errorf("unexpected error: %v", done.Err)
+	}
+}
+
 func TestExecContainer_Validation(t *testing.T) {
 	t.Run("empty task ID", func(t *testing.T) {
 		cmd := ExecContainer("profile", "region", "cluster", "service", "", "container", "/bin/sh")

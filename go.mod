@@ -15,6 +15,11 @@ require (
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2/service/applicationautoscaling v1.41.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.68.3 // indirect
+)
+
+require (
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.7 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.12 // indirect
@@ -28,7 +33,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sso v1.30.13 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.35.17 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.9 // indirect
-	github.com/aws/smithy-go v1.24.2 // indirect
+	github.com/aws/smithy-go v1.24.2
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/charmbracelet/colorprofile v0.2.3-0.20250311203215-f60798e515dc // indirect
 	github.com/charmbracelet/x/ansi v0.8.0

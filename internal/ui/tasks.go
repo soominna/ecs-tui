@@ -116,16 +116,7 @@ func (v *TaskView) Init() tea.Cmd {
 }
 
 func (v *TaskView) tickCmd() tea.Cmd {
-	if v.refreshInterval < 0 {
-		return nil
-	}
-	interval := v.refreshInterval
-	if interval == 0 {
-		interval = 10 * time.Second
-	}
-	return tea.Tick(interval, func(t time.Time) tea.Msg {
-		return taskTickMsg(t)
-	})
+	return newTickCmd(v.refreshInterval, func(t time.Time) taskTickMsg { return taskTickMsg(t) })
 }
 
 func (v *TaskView) fetchTasks() tea.Cmd {

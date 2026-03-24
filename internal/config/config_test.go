@@ -105,6 +105,46 @@ func TestLoadFrom_InvalidYAML(t *testing.T) {
 	}
 }
 
+func TestLoadFrom_RejectsSymlink(t *testing.T) {
+	dir := t.TempDir()
+	realFile := filepath.Join(dir, "real-config.yml")
+	os.WriteFile(realFile, []byte("default_cluster: evil\n"), 0o600)
+
+	linkFile := filepath.Join(dir, "config.yml")
+	os.Symlink(realFile, linkFile)
+
+	cfg := LoadFrom(linkFile)
+	// Should return defaults since symlink is rejected
+	if cfg.DefaultCluster != "" {
+		t.Errorf("DefaultCluster = %q, want empty (symlink should be rejected)", cfg.DefaultCluster)
+	}
+}
+
+func TestLoadFrom_WorldWritable(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yml")
+	os.WriteFile(cfgFile, []byte("default_cluster: unsafe\n"), 0o644)
+	// Explicitly set world-writable (umask would strip it from WriteFile)
+	os.Chmod(cfgFile, 0o666)
+
+	cfg := LoadFrom(cfgFile)
+	// Should return defaults since file is world-writable
+	if cfg.DefaultCluster != "" {
+		t.Errorf("DefaultCluster = %q, want empty (world-writable should be rejected)", cfg.DefaultCluster)
+	}
+}
+
+func TestLoadFrom_SafePermissions(t *testing.T) {
+	dir := t.TempDir()
+	cfgFile := filepath.Join(dir, "config.yml")
+	os.WriteFile(cfgFile, []byte("default_cluster: safe\n"), 0o600)
+
+	cfg := LoadFrom(cfgFile)
+	if cfg.DefaultCluster != "safe" {
+		t.Errorf("DefaultCluster = %q, want %q", cfg.DefaultCluster, "safe")
+	}
+}
+
 func TestConfigFilePath(t *testing.T) {
 	path := ConfigFilePath()
 	if path == "" {
